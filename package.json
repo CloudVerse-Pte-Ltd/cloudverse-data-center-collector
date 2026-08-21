@@ -1,0 +1,26 @@
+{
+  "name": "@cloudverse/data-center-collector",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "audit": "npm audit --audit-level=moderate",
+    "ci": "npm ci && npm run typecheck && npm run build && npm test && npm run audit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "typescript": "^5.5.4",
+    "vitest": "^4.1.9"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.11.0",
+    "undici": "^7.29.0"
+  }
+}

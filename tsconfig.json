@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "packages/gpu-finops/src/**/*.ts",
+    "packages/gpu-finops/tests/**/*.ts",
+    "packages/gpu-finops/examples/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

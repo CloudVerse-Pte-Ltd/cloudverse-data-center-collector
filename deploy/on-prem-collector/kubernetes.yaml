@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: cloudverse-on-prem-collector }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: cloudverse-on-prem-collector } }
+  template:
+    metadata: { labels: { app: cloudverse-on-prem-collector } }
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, fsGroup: 65532, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: collector
+          image: ghcr.io/cloudverse-pte-ltd/on-prem-collector:replace-with-signed-digest
+          imagePullPolicy: IfNotPresent
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
+          envFrom: [{ configMapRef: { name: cloudverse-on-prem-collector } }]
+          env:
+            - { name: COLLECTOR_SPOOL_KEY_FILE, value: /var/run/secrets/cloudverse/spool-key }
+            - { name: COLLECTOR_SCALE_CLASS, value: S }
+            - { name: COLLECTOR_BEARER_TOKEN_FILE, value: /var/run/secrets/cloudverse/bearer-token }
+          volumeMounts:
+            - { name: spool, mountPath: /var/lib/cloudverse/spool }
+            - { name: run, mountPath: /var/run/cloudverse }
+            - { name: key, mountPath: /var/run/secrets/cloudverse, readOnly: true }
+          startupProbe:
+            exec: { command: [node, dist/packages/gpu-finops/src/on-prem-collector/collector-entrypoint.js, --healthcheck] }
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            exec: { command: [node, dist/packages/gpu-finops/src/on-prem-collector/collector-entrypoint.js, --healthcheck] }
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            exec: { command: [node, dist/packages/gpu-finops/src/on-prem-collector/collector-entrypoint.js, --readiness-check] }
+            periodSeconds: 15
+            failureThreshold: 2
+          resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: "1", memory: 512Mi } }
+      volumes:
+        - { name: spool, persistentVolumeClaim: { claimName: cloudverse-on-prem-collector-spool } }
+        - { name: run, emptyDir: { sizeLimit: 16Mi } }
+        - { name: key, secret: { secretName: cloudverse-on-prem-collector-spool-key, defaultMode: 0440 } }
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: cloudverse-on-prem-collector-egress }
+spec:
+  endpointSelector: { matchLabels: { app: cloudverse-on-prem-collector } }
+  ingress: []
+  egress:
+    - toEndpoints: [{ matchLabels: { "k8s:io.kubernetes.pod.namespace": kube-system, "k8s:k8s-app": kube-dns } }]
+      toPorts: [{ ports: [{ port: "53", protocol: UDP }, { port: "53", protocol: TCP }] }]
+    - toFQDNs: [{ matchName: replace-with-exact-cloudverse-ingestion-host }]
+      toPorts: [{ ports: [{ port: "443", protocol: TCP }] }]
+    # Add exact customer source/proxy FQDNs only; never add wildcard or unrestricted CIDR rules.

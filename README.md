@@ -1,6 +1,6 @@
 # CloudVerse Data Center Collector
 
-Audited installers for the CloudVerse in-estate collector. The collector makes
+Source and audited installers for the CloudVerse in-estate collector. The collector makes
 outbound HTTPS connections only. Provider endpoints and credentials remain in
 the customer estate and are never submitted to the CloudVerse UI or API.
 
@@ -19,6 +19,22 @@ registration.
 
 Images are multi-architecture, SBOM-attested, and signed with Sigstore. The
 installer refuses mutable image references unless explicitly overridden.
+
+## Build from source
+
+The Linux collector source is under `packages/gpu-finops/src`; the retained
+directory layout preserves the shared connector SDK boundaries used by the
+vSphere and OpenShift Virtualization adapters. Build and test it with:
+
+```sh
+npm ci
+npm run typecheck
+npm run build
+npm test
+```
+
+Release images are built directly from this repository's `Dockerfile`; no
+private source checkout or prebuilt application layer is used.
 
 ## Security model
 
