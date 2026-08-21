@@ -1,0 +1,10 @@
+name: verify
+on: [push, pull_request]
+permissions: {contents: read}
+jobs:
+  installers:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - run: shellcheck install.sh install-openshift.sh finalize-openshift.sh
+    - run: sh -n install.sh install-openshift.sh finalize-openshift.sh
