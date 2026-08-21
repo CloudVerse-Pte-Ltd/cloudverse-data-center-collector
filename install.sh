@@ -26,9 +26,11 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-[ -n "$CONTROL_PLANE_URL" ] && [ -n "$ORG_ID" ] &&
-  [ -n "$INTEGRATION_ID" ] && [ -n "$PROVIDER" ] &&
-  [ -n "$ENROLLMENT_TOKEN" ] || usage
+if [ -z "$CONTROL_PLANE_URL" ] || [ -z "$ORG_ID" ] ||
+  [ -z "$INTEGRATION_ID" ] || [ -z "$PROVIDER" ] ||
+  [ -z "$ENROLLMENT_TOKEN" ]; then
+  usage
+fi
 case "$CONTROL_PLANE_URL" in https://*) ;; *) echo "Control plane must use HTTPS" >&2; exit 1 ;; esac
 case "$PROVIDER" in
   VSPHERE) ;;

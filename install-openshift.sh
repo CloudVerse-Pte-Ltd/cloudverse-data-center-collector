@@ -11,7 +11,10 @@ while [ "$#" -gt 0 ]; do
     *) exit 2 ;;
   esac
 done
-[ -n "$CONTROL_PLANE_URL" ] && [ -n "$ORG_ID" ] && [ -n "$INTEGRATION_ID" ] && [ -n "$ENROLLMENT_TOKEN" ] || exit 2
+if [ -z "$CONTROL_PLANE_URL" ] || [ -z "$ORG_ID" ] ||
+  [ -z "$INTEGRATION_ID" ] || [ -z "$ENROLLMENT_TOKEN" ]; then
+  exit 2
+fi
 command -v oc >/dev/null 2>&1 || { echo "oc is required" >&2; exit 1; }
 API_HOST="$(printf '%s' "$CONTROL_PLANE_URL" | sed -E 's#^https://([^/]+).*$#\1#')"
 
