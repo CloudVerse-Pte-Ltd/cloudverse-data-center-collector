@@ -106,5 +106,22 @@ spec:
       - {name: bootstrap, secret: {secretName: cloudverse-collector-bootstrap}}
 EOF
 oc rollout status deployment/cloudverse-data-center-collector -n cloudverse-system --timeout=180s
-echo "Collector deployed. After the UI reports authentication passed, run:"
-echo "curl -fsSL https://github.com/CloudVerse-Pte-Ltd/cloudverse-data-center-collector/releases/latest/download/finalize-openshift.sh | sh"
+ENROLLED=false
+attempt=0
+while [ "$attempt" -lt 60 ]; do
+  if oc exec deployment/cloudverse-data-center-collector -n cloudverse-system -- test -s /var/lib/cloudverse/identity/identity.json >/dev/null 2>&1; then
+    ENROLLED=true
+    break
+  fi
+  attempt=$((attempt + 1))
+  sleep 2
+done
+if [ "$ENROLLED" != "true" ]; then
+  echo "Collector did not enroll within 120 seconds; bootstrap Secret retained for a safe retry." >&2
+  exit 1
+fi
+oc set env deployment/cloudverse-data-center-collector -n cloudverse-system COLLECTOR_ENROLLMENT_TOKEN_FILE-
+oc set volume deployment/cloudverse-data-center-collector -n cloudverse-system --remove --name=bootstrap
+oc delete secret cloudverse-collector-bootstrap -n cloudverse-system
+oc rollout status deployment/cloudverse-data-center-collector -n cloudverse-system --timeout=180s
+echo "Collector enrolled; the one-time bootstrap Secret and volume reference were removed."
