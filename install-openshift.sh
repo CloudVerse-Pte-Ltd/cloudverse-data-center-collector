@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 CONTROL_PLANE_URL=""; ORG_ID=""; INTEGRATION_ID=""; ENROLLMENT_TOKEN=""
-IMAGE="${COLLECTOR_IMAGE:-ghcr.io/cloudverse-pte-ltd/on-prem-collector:latest}"
+IMAGE="${COLLECTOR_IMAGE:-ghcr.io/cloudverse-pte-ltd/on-prem-collector@sha256:d99427e159de32339119dbc7c96a43ef7b76d09da62288b217b2f50079347f95}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --control-plane-url) CONTROL_PLANE_URL="$2"; shift 2 ;;
@@ -15,6 +15,7 @@ if [ -z "$CONTROL_PLANE_URL" ] || [ -z "$ORG_ID" ] ||
   [ -z "$INTEGRATION_ID" ] || [ -z "$ENROLLMENT_TOKEN" ]; then
   exit 2
 fi
+case "$IMAGE" in *@sha256:*) ;; *) [ "${COLLECTOR_ALLOW_MUTABLE_IMAGE:-false}" = "true" ] || { echo "Collector image must be digest-pinned" >&2; exit 1; } ;; esac
 command -v oc >/dev/null 2>&1 || { echo "oc is required" >&2; exit 1; }
 API_HOST="$(printf '%s' "$CONTROL_PLANE_URL" | sed -E 's#^https://([^/]+).*$#\1#')"
 

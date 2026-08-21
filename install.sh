@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-IMAGE_DEFAULT="ghcr.io/cloudverse-pte-ltd/on-prem-collector:latest"
+IMAGE_DEFAULT="ghcr.io/cloudverse-pte-ltd/on-prem-collector@sha256:d99427e159de32339119dbc7c96a43ef7b76d09da62288b217b2f50079347f95"
 CONTROL_PLANE_URL=""
 ORG_ID=""
 INTEGRATION_ID=""
@@ -32,6 +32,7 @@ if [ -z "$CONTROL_PLANE_URL" ] || [ -z "$ORG_ID" ] ||
   usage
 fi
 case "$CONTROL_PLANE_URL" in https://*) ;; *) echo "Control plane must use HTTPS" >&2; exit 1 ;; esac
+case "$IMAGE" in *@sha256:*) ;; *) [ "${COLLECTOR_ALLOW_MUTABLE_IMAGE:-false}" = "true" ] || { echo "Collector image must be digest-pinned" >&2; exit 1; } ;; esac
 case "$PROVIDER" in
   VSPHERE) ;;
   OPENSHIFT_VIRTUALIZATION)
