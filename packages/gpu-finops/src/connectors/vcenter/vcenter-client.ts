@@ -96,6 +96,7 @@ export function createVCenterClient(config: VCenterConnectorConfig, options?: { 
   const limited = requestLimiter(sourceConcurrency);
   const limitedFetch: typeof fetch = (input, init) => limited(() => fetchImpl(input, init));
   const timeoutMs = config.timeoutMs ?? 10_000;
+  const timedFetch = (url: URL, init: RequestInit) => limited(() => fetchWithTimeout(fetchImpl, url, init, timeoutMs));
   const maxRetries = config.maxRetries ?? 1;
   const inventoryPath = config.inventoryPath ?? '/api/vcenter/inventory';
 
@@ -112,7 +113,7 @@ export function createVCenterClient(config: VCenterConnectorConfig, options?: { 
       ...(sessionId ? { 'vmware-api-session-id': sessionId } : authHeaders(config)),
     });
     if (init.body) headers.set('Content-Type', 'application/json');
-    const response = await fetchWithTimeout(limitedFetch, url, { ...init, headers }, timeoutMs);
+    const response = await timedFetch(url, { ...init, headers });
     if (!response.ok) throw new VCenterConnectorError('vcenter_query_failed', `vCenter query failed with HTTP ${response.status}.`, response.status >= 500, { status: response.status, path });
     if (response.status === 204) return null;
     return response.json();
@@ -170,7 +171,7 @@ export function createVCenterClient(config: VCenterConnectorConfig, options?: { 
       let lastError: unknown;
       for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
         try {
-          const response = await fetchWithTimeout(limitedFetch, url, { method: 'GET', headers }, timeoutMs);
+          const response = await timedFetch(url, { method: 'GET', headers });
           if (!response.ok) {
             throw new VCenterConnectorError('vcenter_query_failed', `vCenter query failed with HTTP ${response.status}.`, response.status >= 500, {
               status: response.status,

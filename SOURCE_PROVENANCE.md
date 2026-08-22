@@ -2,7 +2,7 @@
 
 The collector runtime and its vSphere/OpenShift connector dependency closure
 were synchronized with `CloudVerse-Pte-Ltd/GPU-Integrations` commit
-`e4f49a37` on 2026-08-22. The synchronized change enforces the ratified
+`8b2fb0d8` on 2026-08-22. The synchronized change enforces the ratified
 S/M/L/XL source-request concurrency ceilings in both distributions.
 
 `GPU-Integrations` remains the authoritative shared connector SDK. This public

@@ -93,6 +93,17 @@ describe('vCenter GPU inventory evidence connector', () => {
     expect(peak).toBe(2);
   });
 
+  it('starts the network timeout only after a queued request acquires its source slot', async () => {
+    const fetchImpl = vi.fn<typeof fetch>((_input, init) => new Promise((resolve, reject) => {
+      const signal = init?.signal;
+      const timer = setTimeout(() => resolve(jsonResponse({ ok: true })), 8);
+      const abort = () => { clearTimeout(timer); reject(new DOMException('aborted', 'AbortError')); };
+      if (signal?.aborted) abort(); else signal?.addEventListener('abort', abort, { once: true });
+    }));
+    const client = createVCenterClient({ ...config, timeoutMs: 12 }, { fetchImpl, sourceConcurrency: 1 });
+    await expect(Promise.all([client.inventory(), client.inventory()])).resolves.toHaveLength(2);
+  });
+
   it('authenticates natively and discovers version, plane identity, privileges, and datacenters', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       const path = new URL(String(input)).pathname;
