@@ -90,6 +90,7 @@ async function main() {
         managementPlaneUid,
         adapterName: provider === 'OPENSHIFT_VIRTUALIZATION' ? 'openshift-virtualization' : 'vcenter-property-collector',
         adapterVersion: '1.0.0',
+        scaleClass: spoolBudget.scaleClass,
       });
     }
     const privateKeyPem = await readFile(process.env.COLLECTOR_SIGNING_PRIVATE_KEY_FILE ?? statePaths.signingPrivateKey, 'utf8');

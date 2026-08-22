@@ -10,6 +10,7 @@ export interface StartCollectorRunInput {
   managementPlaneUid: string;
   adapterName: string;
   adapterVersion: string;
+  scaleClass: 'S' | 'M' | 'L' | 'XL';
   requestedWindow?: { start: string; end: string };
 }
 
@@ -36,6 +37,7 @@ export async function startCollectorRun(
       managementPlaneUid: input.managementPlaneUid,
       adapterName: input.adapterName,
       adapterVersion: input.adapterVersion,
+      scaleClass: input.scaleClass,
       requestedWindowStart: input.requestedWindow?.start,
       requestedWindowEnd: input.requestedWindow?.end,
     }),
@@ -50,6 +52,7 @@ export async function startCollectorRun(
     integrationId: input.integrationId,
     collectionRunId: run.id,
     managementPlaneUid: run.managementPlaneUid,
+    scaleClass: input.scaleClass,
     requestedWindow: input.requestedWindow,
   };
 }

@@ -14,6 +14,7 @@ describe('collector control-plane client', () => {
       managementPlaneUid: 'vcenter:1234',
       adapterName: 'vcenter-property-collector',
       adapterVersion: '1.0.0',
+      scaleClass: 'S',
     }, async (url, init) => {
       request = { url: String(url), headers: init?.headers, body: JSON.parse(String(init?.body)) };
       return new Response(JSON.stringify({ id: '018f0d8e-7b23-7000-8000-000000000001', managementPlaneUid: 'vcenter:1234' }), { status: 201 });
@@ -35,6 +36,7 @@ describe('collector control-plane client', () => {
       managementPlaneUid: 'vcenter:expected',
       adapterName: 'vcenter-property-collector',
       adapterVersion: '1.0.0',
+      scaleClass: 'S',
     }, async () => new Response(JSON.stringify({
       id: '018f0d8e-7b23-7000-8000-000000000001',
       managementPlaneUid: 'vcenter:other',

@@ -36,6 +36,7 @@ const assignment = {
   integrationId: 7,
   collectionRunId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   managementPlaneUid: 'vcenter:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  scaleClass: 'S' as const,
 };
 
 describe('InEstateCollectorSupervisor', () => {

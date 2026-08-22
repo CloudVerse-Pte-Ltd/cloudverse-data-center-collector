@@ -8,6 +8,7 @@ export interface CollectorRunAssignment {
   integrationId: number;
   collectionRunId: string;
   managementPlaneUid: string;
+  scaleClass: 'S' | 'M' | 'L' | 'XL';
   requestedWindow?: { start: string; end: string };
 }
 
@@ -37,7 +38,7 @@ export class InEstateCollectorSupervisor {
   ) {}
 
   async run<TConfig, TRecord>(assignment: CollectorRunAssignment, adapter: InEstateCollectorAdapter<TConfig, TRecord>, config: TConfig): Promise<CollectorSupervisorResult> {
-    if (!Number.isSafeInteger(assignment.orgId) || assignment.orgId <= 0 || !Number.isSafeInteger(assignment.integrationId) || assignment.integrationId <= 0 || !assignment.managementPlaneUid.trim()) {
+    if (!Number.isSafeInteger(assignment.orgId) || assignment.orgId <= 0 || !Number.isSafeInteger(assignment.integrationId) || assignment.integrationId <= 0 || !assignment.managementPlaneUid.trim() || !['S', 'M', 'L', 'XL'].includes(assignment.scaleClass)) {
       throw new Error('Collector run assignment is invalid');
     }
     let cursor: string | undefined;
@@ -83,7 +84,7 @@ export class InEstateCollectorSupervisor {
         records: [],
         completion: {
           status,
-          recordCounts: { pages, records, errors: errors.length, capabilities: capabilities.length },
+          recordCounts: { pages, records, errors: errors.length, capabilities: capabilities.length, scaleClass: assignment.scaleClass },
           errors,
           coverage: { requestedWindow: assignment.requestedWindow ?? null },
         },
@@ -96,7 +97,7 @@ export class InEstateCollectorSupervisor {
         records: [],
         completion: {
           status: 'FAILED',
-          recordCounts: { pages, records, errors: errors.length + 1, capabilities: capabilities.length },
+          recordCounts: { pages, records, errors: errors.length + 1, capabilities: capabilities.length, scaleClass: assignment.scaleClass },
           errors: [...errors, { code: 'collector_run_failed', message: redactCollectorError(error), retryable: false }],
           coverage: { requestedWindow: assignment.requestedWindow ?? null },
         },
