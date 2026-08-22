@@ -1,8 +1,9 @@
 # Source provenance
 
 The collector runtime and its vSphere/OpenShift connector dependency closure
-were vendored from `CloudVerse-Pte-Ltd/GPU-Integrations` commit
-`83c54a35` on 2026-08-22.
+were synchronized with `CloudVerse-Pte-Ltd/GPU-Integrations` commit
+`e4f49a37` on 2026-08-22. The synchronized change enforces the ratified
+S/M/L/XL source-request concurrency ceilings in both distributions.
 
 `GPU-Integrations` remains the authoritative shared connector SDK. This public
 repository is the auditable distribution boundary: its release workflow builds
