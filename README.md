@@ -10,8 +10,10 @@ the customer estate and are never submitted to the CloudVerse UI or API.
   access to vCenter.
 - OpenShift Virtualization: namespaced Deployment using a dedicated service
   account and read-only RBAC.
-- Hyper-V/SCVMM: signed Windows collector package (published separately by the
-  Windows release workflow).
+- Hyper-V/SCVMM: the public
+  [`windows-on-prem-collector`](https://github.com/CloudVerse-Pte-Ltd/windows-on-prem-collector)
+  source and Windows release workflow. Release candidates marked `unsigned`
+  are signing inputs only and cannot pass the production installer gate.
 
 Generate the one-time command from **Settings → Integrations → Data Center**.
 The enrollment token expires after 30 minutes and is deleted after successful
@@ -19,6 +21,11 @@ registration.
 
 Images are multi-architecture, SBOM-attested, and signed with Sigstore. The
 installer refuses mutable image references unless explicitly overridden.
+
+The two public repositories share the same outbound enrollment, signed bundle,
+encrypted spool and offline-import protocol. They remain separate build trust
+boundaries because Windows operational scripts additionally require enterprise
+Authenticode signing and constrained execution.
 
 ## Build from source
 
