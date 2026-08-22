@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-IMAGE_DEFAULT="ghcr.io/cloudverse-pte-ltd/cloudverse-data-center-collector@sha256:fd60a7e884b96ba2d755a8de9cc2f3af3128c9acfd7aba71ead6c7e0a91260cc"
+IMAGE_DEFAULT="ghcr.io/cloudverse-pte-ltd/cloudverse-data-center-collector@sha256:b3ce2908efb464a53fa62bd81bb85b2669a5309fb82f5daf8434381a7a86db09"
 CONTROL_PLANE_URL=""
 ORG_ID=""
 INTEGRATION_ID=""

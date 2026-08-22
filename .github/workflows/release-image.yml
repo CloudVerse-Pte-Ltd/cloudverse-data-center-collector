@@ -2,7 +2,7 @@ name: release-image
 on:
   workflow_dispatch:
   push:
-    tags: ['v*']
+    tags: ['collector-image-v*']
 permissions: {contents: read, packages: write, id-token: write, attestations: write}
 jobs:
   build-sign-attest:
