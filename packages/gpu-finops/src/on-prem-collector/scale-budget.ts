@@ -8,6 +8,13 @@ export const COLLECTOR_SPOOL_BUDGET_BYTES: Readonly<Record<CollectorScaleClass, 
   XL: 500 * GIB,
 });
 
+export const COLLECTOR_SOURCE_CONCURRENCY: Readonly<Record<CollectorScaleClass, number>> = Object.freeze({
+  S: 4,
+  M: 8,
+  L: 12,
+  XL: 16,
+});
+
 export function collectorSpoolBudget(environment: NodeJS.ProcessEnv = process.env) {
   const scaleClass = String(environment.COLLECTOR_SCALE_CLASS ?? '').trim().toUpperCase() as CollectorScaleClass;
   const ceiling = COLLECTOR_SPOOL_BUDGET_BYTES[scaleClass];
@@ -15,5 +22,5 @@ export function collectorSpoolBudget(environment: NodeJS.ProcessEnv = process.en
   const configured = Number(environment.COLLECTOR_SPOOL_MAX_BYTES ?? ceiling);
   if (!Number.isSafeInteger(configured) || configured <= 0) throw new Error('COLLECTOR_SPOOL_MAX_BYTES must be a positive integer');
   if (configured > ceiling) throw new Error(`COLLECTOR_SPOOL_MAX_BYTES exceeds the ratified ${scaleClass} scale-class ceiling`);
-  return { scaleClass, maxBytes: configured, ceiling };
+  return { scaleClass, maxBytes: configured, ceiling, sourceConcurrency: COLLECTOR_SOURCE_CONCURRENCY[scaleClass] };
 }

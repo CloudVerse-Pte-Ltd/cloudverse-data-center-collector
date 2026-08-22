@@ -63,6 +63,10 @@ export class OpenShiftVirtualizationInEstateAdapter implements DataCenterConnect
   readonly version = '1.0.0';
   readonly capabilities = ['AUTHENTICATE', 'DESCRIBE_PLATFORM', 'DISCOVER_PLANES', 'DISCOVER_INVENTORY'] as const;
 
+  constructor(private readonly sourceConcurrency = 4) {
+    if (!Number.isSafeInteger(sourceConcurrency) || sourceConcurrency < 1 || sourceConcurrency > 16) throw new Error('OpenShift source concurrency must be between 1 and 16');
+  }
+
   async validateConfig(config: OpenShiftInEstateAdapterConfig): Promise<void> {
     const validation = validateKubernetesConnectorConfig(config.kubernetes);
     const error = validation.findings.find((finding) => finding.severity === 'ERROR');
@@ -81,7 +85,7 @@ export class OpenShiftVirtualizationInEstateAdapter implements DataCenterConnect
       collectionRunId: context.collectionRunId,
       managementPlaneUid: context.managementPlaneUid,
       collectedAt: new Date().toISOString(),
-    }, { namespaces: config.namespaces });
+    }, { namespaces: config.namespaces, sourceConcurrency: this.sourceConcurrency });
     return {
       ...result,
       errors: result.errors.map((error) => ({ ...error, category: error.code.includes('permission') ? 'AUTHORIZATION' as const : 'SOURCE_UNAVAILABLE' as const })),

@@ -103,7 +103,7 @@ async function main() {
     const result = provider === 'VCENTER' || provider === 'VSPHERE'
       ? await supervisor.run(assignment, new VCenterInEstateAdapter(), providerConfig)
       : provider === 'OPENSHIFT_VIRTUALIZATION'
-        ? await supervisor.run(assignment, new OpenShiftVirtualizationInEstateAdapter(), providerConfig)
+        ? await supervisor.run(assignment, new OpenShiftVirtualizationInEstateAdapter(spoolBudget.sourceConcurrency), providerConfig)
         : (() => { throw new Error('COLLECTOR_PROVIDER must be VCENTER or OPENSHIFT_VIRTUALIZATION for this runtime'); })();
     if (result.status === 'FAILED') throw new Error('Provider collection failed; signed failure evidence remains in the spool');
   }

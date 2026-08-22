@@ -71,8 +71,30 @@ async function fetchWithTimeout(fetchImpl: typeof fetch, url: URL, init: Request
   }
 }
 
-export function createVCenterClient(config: VCenterConnectorConfig, options?: { fetchImpl?: typeof fetch }): VCenterClient {
+function requestLimiter(limit: number) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 16) {
+    throw new VCenterConnectorError('vcenter_source_concurrency_invalid', 'vCenter source concurrency must be between 1 and 16.', false);
+  }
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  const acquire = () => {
+    if (active < limit) { active += 1; return Promise.resolve(); }
+    return new Promise<void>((resolve) => waiting.push(() => { active += 1; resolve(); }));
+  };
+  return async <T>(operation: () => Promise<T>): Promise<T> => {
+    await acquire();
+    try { return await operation(); } finally {
+      active -= 1;
+      waiting.shift()?.();
+    }
+  };
+}
+
+export function createVCenterClient(config: VCenterConnectorConfig, options?: { fetchImpl?: typeof fetch; sourceConcurrency?: number }): VCenterClient {
   const fetchImpl = options?.fetchImpl ?? fetch;
+  const sourceConcurrency = options?.sourceConcurrency ?? 4;
+  const limited = requestLimiter(sourceConcurrency);
+  const limitedFetch: typeof fetch = (input, init) => limited(() => fetchImpl(input, init));
   const timeoutMs = config.timeoutMs ?? 10_000;
   const maxRetries = config.maxRetries ?? 1;
   const inventoryPath = config.inventoryPath ?? '/api/vcenter/inventory';
@@ -90,7 +112,7 @@ export function createVCenterClient(config: VCenterConnectorConfig, options?: { 
       ...(sessionId ? { 'vmware-api-session-id': sessionId } : authHeaders(config)),
     });
     if (init.body) headers.set('Content-Type', 'application/json');
-    const response = await fetchWithTimeout(fetchImpl, url, { ...init, headers }, timeoutMs);
+    const response = await fetchWithTimeout(limitedFetch, url, { ...init, headers }, timeoutMs);
     if (!response.ok) throw new VCenterConnectorError('vcenter_query_failed', `vCenter query failed with HTTP ${response.status}.`, response.status >= 500, { status: response.status, path });
     if (response.status === 204) return null;
     return response.json();
@@ -148,7 +170,7 @@ export function createVCenterClient(config: VCenterConnectorConfig, options?: { 
       let lastError: unknown;
       for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
         try {
-          const response = await fetchWithTimeout(fetchImpl, url, { method: 'GET', headers }, timeoutMs);
+          const response = await fetchWithTimeout(limitedFetch, url, { method: 'GET', headers }, timeoutMs);
           if (!response.ok) {
             throw new VCenterConnectorError('vcenter_query_failed', `vCenter query failed with HTTP ${response.status}.`, response.status >= 500, {
               status: response.status,
@@ -172,7 +194,7 @@ export function createVCenterClient(config: VCenterConnectorConfig, options?: { 
           baseUrl: origin,
           username: config.auth.basic.username,
           password: config.auth.basic.password,
-          fetchImpl,
+          fetchImpl: limitedFetch,
         })
         : config.managementPlaneUid
           ? { instanceUuid: config.managementPlaneUid.replace(/^vcenter:/i, '') }
@@ -242,8 +264,8 @@ export function createVCenterClient(config: VCenterConnectorConfig, options?: { 
       const snapshots: Array<{ vm: string; snapshots: unknown[] }> = [];
       const nics: Array<{ vm: string; devices: unknown[] }> = [];
       let snapshotBlocked = false;
-      for (let offset = 0; offset < ids.length; offset += 8) {
-        await Promise.all(ids.slice(offset, offset + 8).map(async (vm) => {
+      for (let offset = 0; offset < ids.length; offset += sourceConcurrency) {
+        await Promise.all(ids.slice(offset, offset + sourceConcurrency).map(async (vm) => {
           const encoded = encodeURIComponent(vm);
           const [diskResult, snapshotResult, nicResult] = await Promise.allSettled([
             request(`/api/vcenter/vm/${encoded}/hardware/disk`, {}, sessionId),

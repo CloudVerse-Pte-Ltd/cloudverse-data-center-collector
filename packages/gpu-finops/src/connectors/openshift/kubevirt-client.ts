@@ -55,6 +55,26 @@ export interface OpenShiftVirtualizationClientOptions {
   pageLimit?: number;
   maxPages?: number;
   namespaces?: string[];
+  sourceConcurrency?: number;
+}
+
+function requestLimiter(limit: number) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 16) {
+    throw new KubernetesConnectorError('invalid_source_concurrency', 'OpenShift source concurrency must be between 1 and 16.', false);
+  }
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  const acquire = () => {
+    if (active < limit) { active += 1; return Promise.resolve(); }
+    return new Promise<void>((resolve) => waiting.push(() => { active += 1; resolve(); }));
+  };
+  return async <T>(operation: () => Promise<T>): Promise<T> => {
+    await acquire();
+    try { return await operation(); } finally {
+      active -= 1;
+      waiting.shift()?.();
+    }
+  };
 }
 
 function endpoint(baseUrl: string, path: string, query?: Record<string, string>): URL {
@@ -94,16 +114,17 @@ export function createOpenShiftVirtualizationClient(
   if (!fetchImpl) throw new KubernetesConnectorError('fetch_unavailable', 'Global fetch is unavailable in this Node runtime.', false);
   const pageLimit = options.pageLimit ?? 500;
   const maxPages = options.maxPages ?? 10_000;
+  const limited = requestLimiter(options.sourceConcurrency ?? 4);
 
   async function get(path: string, query?: Record<string, string>): Promise<JsonMap> {
-    const response = await fetchImpl(endpoint(config.baseUrl, path, query), { method: 'GET', headers: await headers(config) });
+    const response = await limited(async () => fetchImpl(endpoint(config.baseUrl, path, query), { method: 'GET', headers: await headers(config) }));
     if (!response.ok) throw new KubernetesConnectorError('openshift_api_error', `OpenShift API returned HTTP ${response.status}.`, response.status === 429 || response.status >= 500, { status: response.status, path });
     return map(await response.json());
   }
 
   async function post(path: string, body: JsonMap): Promise<JsonMap> {
     const requestHeaders = await headers(config); requestHeaders.set('Content-Type', 'application/json');
-    const response = await fetchImpl(endpoint(config.baseUrl, path), { method: 'POST', headers: requestHeaders, body: JSON.stringify(body) });
+    const response = await limited(() => fetchImpl(endpoint(config.baseUrl, path), { method: 'POST', headers: requestHeaders, body: JSON.stringify(body) }));
     if (!response.ok) throw new KubernetesConnectorError('openshift_api_error', `OpenShift API returned HTTP ${response.status}.`, response.status === 429 || response.status >= 500, { status: response.status, path });
     return map(await response.json());
   }

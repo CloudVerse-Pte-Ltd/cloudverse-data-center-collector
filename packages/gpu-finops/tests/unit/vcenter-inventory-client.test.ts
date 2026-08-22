@@ -79,6 +79,20 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe('vCenter GPU inventory evidence connector', () => {
+  it('never exceeds the selected scale-class source concurrency across inventory fan-out', async () => {
+    let active = 0; let peak = 0;
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      active += 1; peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/session') return jsonResponse('session-bounded');
+      return jsonResponse([]);
+    });
+    await createVCenterClient({ ...config, auth: { basic: { username: 'reader', password: 'secret' } } }, { fetchImpl, sourceConcurrency: 2 }).nativeInventory();
+    expect(peak).toBe(2);
+  });
+
   it('authenticates natively and discovers version, plane identity, privileges, and datacenters', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       const path = new URL(String(input)).pathname;

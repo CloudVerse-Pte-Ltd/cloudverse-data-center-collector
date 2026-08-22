@@ -5,6 +5,22 @@ const config = { baseUrl: 'https://api.openshift.example:6443', auth: { bearerTo
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
 describe('OpenShift Virtualization connector', () => {
+  it('never exceeds the selected scale-class source concurrency across discovery fan-out', async () => {
+    let active = 0; let peak = 0;
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      active += 1; peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      const path = new URL(String(input)).pathname;
+      if (path === '/version') return response({ gitVersion: 'v1.31.4' });
+      if (path === '/apis') return response({ groups: [{ name: 'kubevirt.io' }] });
+      if (path.endsWith('/infrastructures/cluster')) return response({ metadata: { uid: 'infra-uid' } });
+      return response({});
+    });
+    await createOpenShiftVirtualizationClient(config, { fetchImpl, sourceConcurrency: 2 }).discover();
+    expect(peak).toBe(2);
+  });
+
   it('discovers OpenShift, KubeVirt API capability and effective read permissions', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input) => {
       const path = new URL(String(input)).pathname;
