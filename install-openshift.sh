@@ -1,20 +1,28 @@
 #!/bin/sh
 set -eu
-CONTROL_PLANE_URL=""; ORG_ID=""; INTEGRATION_ID=""; ENROLLMENT_TOKEN=""
+CONTROL_PLANE_URL=""; ORG_ID=""; INTEGRATION_ID=""; SCALE_CLASS=""; ENROLLMENT_TOKEN=""
 IMAGE="${COLLECTOR_IMAGE:-ghcr.io/cloudverse-pte-ltd/cloudverse-data-center-collector@sha256:2fb62ab78725a5ee98ceac2382cf3c9098113d479bee52d75ada69f77bb52a33}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --control-plane-url) CONTROL_PLANE_URL="$2"; shift 2 ;;
     --org-id) ORG_ID="$2"; shift 2 ;;
     --integration-id) INTEGRATION_ID="$2"; shift 2 ;;
+    --scale-class) SCALE_CLASS="$2"; shift 2 ;;
     --enrollment-token) ENROLLMENT_TOKEN="$2"; shift 2 ;;
     *) exit 2 ;;
   esac
 done
 if [ -z "$CONTROL_PLANE_URL" ] || [ -z "$ORG_ID" ] ||
-  [ -z "$INTEGRATION_ID" ] || [ -z "$ENROLLMENT_TOKEN" ]; then
+  [ -z "$INTEGRATION_ID" ] || [ -z "$SCALE_CLASS" ] || [ -z "$ENROLLMENT_TOKEN" ]; then
   exit 2
 fi
+case "$SCALE_CLASS" in
+  S) SPOOL_SIZE=10Gi ;;
+  M) SPOOL_SIZE=50Gi ;;
+  L) SPOOL_SIZE=200Gi ;;
+  XL) SPOOL_SIZE=500Gi ;;
+  *) exit 2 ;;
+esac
 case "$IMAGE" in *@sha256:*) ;; *) [ "${COLLECTOR_ALLOW_MUTABLE_IMAGE:-false}" = "true" ] || { echo "Collector image must be digest-pinned" >&2; exit 1; } ;; esac
 command -v oc >/dev/null 2>&1 || { echo "oc is required" >&2; exit 1; }
 API_HOST="$(printf '%s' "$CONTROL_PLANE_URL" | sed -E 's#^https://([^/]+).*$#\1#')"
@@ -69,7 +77,7 @@ kind: PersistentVolumeClaim
 metadata: {name: cloudverse-data-center-collector-state, namespace: cloudverse-system}
 spec:
   accessModes: [ReadWriteOnce]
-  resources: {requests: {storage: 2Gi}}
+  resources: {requests: {storage: $SPOOL_SIZE}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -91,6 +99,7 @@ spec:
         - {name: COLLECTOR_ORG_ID, value: "$ORG_ID"}
         - {name: COLLECTOR_INTEGRATION_ID, value: "$INTEGRATION_ID"}
         - {name: COLLECTOR_PROVIDER, value: OPENSHIFT_VIRTUALIZATION}
+        - {name: COLLECTOR_SCALE_CLASS, value: "$SCALE_CLASS"}
         - {name: COLLECTOR_ENROLLMENT_TOKEN_FILE, value: /bootstrap/enrollment-token}
         - {name: COLLECTOR_PROVIDER_CONFIG_FILE, value: /config/provider.json}
         - {name: COLLECTOR_ALLOWED_HOSTS, value: "$API_HOST"}
