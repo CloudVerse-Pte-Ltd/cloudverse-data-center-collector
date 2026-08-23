@@ -70,6 +70,11 @@ async function main() {
   });
   const providerConfigFile = process.env.COLLECTOR_PROVIDER_CONFIG_FILE?.trim();
   const assignmentFile = process.env.COLLECTOR_RUN_ASSIGNMENT_FILE?.trim();
+  const requestedWindowStart = process.env.COLLECTOR_REQUESTED_WINDOW_START?.trim();
+  const requestedWindowEnd = process.env.COLLECTOR_REQUESTED_WINDOW_END?.trim();
+  if (Boolean(requestedWindowStart) !== Boolean(requestedWindowEnd)) throw new Error('COLLECTOR_REQUESTED_WINDOW_START and COLLECTOR_REQUESTED_WINDOW_END must be supplied together');
+  const requestedWindow = requestedWindowStart && requestedWindowEnd ? { start: requestedWindowStart, end: requestedWindowEnd } : undefined;
+  if (requestedWindow && (!Number.isFinite(Date.parse(requestedWindow.start)) || !Number.isFinite(Date.parse(requestedWindow.end)) || new Date(requestedWindow.end) <= new Date(requestedWindow.start))) throw new Error('collector requested telemetry window is invalid');
   if (providerConfigFile && String(process.env.COLLECTOR_COLLECT_ON_START ?? 'true').toLowerCase() === 'true') {
     const providerConfig = JSON.parse(await readFile(providerConfigFile, 'utf8'));
     const provider = required('COLLECTOR_PROVIDER').toUpperCase();
@@ -100,6 +105,7 @@ async function main() {
         adapterName: provider === 'OPENSHIFT_VIRTUALIZATION' ? 'openshift-virtualization' : 'vcenter-property-collector',
         adapterVersion: '1.0.0',
         scaleClass: spoolBudget.scaleClass,
+        requestedWindow,
       });
     }
     const privateKeyPem = await readFile(process.env.COLLECTOR_SIGNING_PRIVATE_KEY_FILE ?? statePaths.signingPrivateKey, 'utf8');

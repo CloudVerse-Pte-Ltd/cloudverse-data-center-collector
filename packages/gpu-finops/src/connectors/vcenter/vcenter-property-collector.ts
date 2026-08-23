@@ -509,7 +509,7 @@ export async function collectVCenterPerformance(input: {
   const facts: VCenterPerformanceFact[] = []; const gaps: VCenterPerformanceGap[] = []; let requests = 0;
   for (let offset = 0; offset < input.entities.length; offset += entityBatchSize) {
     const batch = input.entities.slice(offset, offset + entityBatchSize);
-    const specs = batch.map((entity) => `<vim25:querySpec><vim25:entity type="${entity.type}">${escapeXml(entity.value)}</vim25:entity>${counters.map((counter) => `<vim25:metricId><vim25:counterId>${counter.key}</vim25:counterId><vim25:instance></vim25:instance></vim25:metricId>`).join('')}<vim25:startTime>${start.toISOString()}</vim25:startTime><vim25:endTime>${end.toISOString()}</vim25:endTime><vim25:intervalId>${input.intervalId}</vim25:intervalId><vim25:format>csv</vim25:format></vim25:querySpec>`).join('');
+    const specs = batch.map((entity) => `<vim25:querySpec><vim25:entity type="${entity.type}">${escapeXml(entity.value)}</vim25:entity>${counters.map((counter) => `<vim25:metricId><vim25:counterId>${counter.key}</vim25:counterId><vim25:instance></vim25:instance></vim25:metricId>`).join('')}<vim25:startTime>${start.toISOString()}</vim25:startTime><vim25:endTime>${end.toISOString()}</vim25:endTime><vim25:intervalId>${interval.samplingPeriodSeconds}</vim25:intervalId><vim25:format>csv</vim25:format></vim25:querySpec>`).join('');
     const parsed = parser.parse(await call(`<vim25:QueryPerf><vim25:_this type="PerformanceManager">${escapeXml(perfManager)}</vim25:_this>${specs}</vim25:QueryPerf>`)); requests += 1;
     const rawRows = parsed?.Envelope?.Body?.QueryPerfResponse?.returnval; const rows = Array.isArray(rawRows) ? rawRows : rawRows ? [rawRows] : [];
     const returned = new Set<string>();
@@ -528,27 +528,34 @@ export async function collectVCenterPerformance(input: {
         }
       }
     }
-    for (const entity of batch) for (const counter of counters) if (!returned.has(`${entity.value}:${counter.semantic}`)) gaps.push({ assetId: entity.assetId, entity, semantic: counter.semantic, reason: 'SERIES_NOT_RETURNED', evidence: { startTime: start.toISOString(), endTime: end.toISOString(), intervalId: input.intervalId } });
+    for (const entity of batch) for (const counter of counters) if (!returned.has(`${entity.value}:${counter.semantic}`)) gaps.push({ assetId: entity.assetId, entity, semantic: counter.semantic, reason: 'SERIES_NOT_RETURNED', evidence: { startTime: start.toISOString(), endTime: end.toISOString(), intervalKey: input.intervalId, samplingPeriodSeconds: interval.samplingPeriodSeconds } });
   }
   return { facts, gaps, requests, points: facts.length };
 }
 
-const VCENTER_CANONICAL_SEMANTIC: Record<string, string> = {
+export const VCENTER_CANONICAL_SEMANTIC: Readonly<Record<string, string>> = {
   'cpu.usage.average': 'guest.cpu.usage.percent',
   'cpu.ready.summation': 'guest.cpu.contention.milliseconds',
   'mem.usage.average': 'guest.memory.consumed.percent',
   'mem.active.average': 'guest.memory.active.bytes',
 };
 
+export type VCenterTelemetryEnvelope = ReturnType<typeof toVCenterTelemetryEnvelope>;
+
 export function toVCenterTelemetryEnvelope(input: { integrationId: number; managementPlaneUid: string; metricSet: string; expectedStart: string; expectedEnd: string; facts: VCenterPerformanceFact[]; gaps: VCenterPerformanceGap[] }) {
   if (!Number.isSafeInteger(input.integrationId) || input.integrationId <= 0 || !/^vcenter:[0-9a-f-]{36}$/i.test(input.managementPlaneUid) || !input.metricSet.trim() || !Number.isFinite(Date.parse(input.expectedStart)) || !Number.isFinite(Date.parse(input.expectedEnd)) || new Date(input.expectedEnd) <= new Date(input.expectedStart)) throw new VCenterConnectorError('vcenter_metric_envelope_invalid', 'vCenter metric envelope scope or window is invalid.', false);
   const assetKind = (entity: VCenterPerformanceEntity) => entity.type === 'VirtualMachine' ? 'VIRTUAL_MACHINE' as const : 'HOST' as const;
+  const canonicalSourceUid = (assetId: string) => {
+    const value = assetId.trim().toLowerCase();
+    if (!value) throw new VCenterConnectorError('vcenter_metric_asset_identity_missing', 'vCenter metric entity has no canonical inventory source UID.', false);
+    return value;
+  };
   return {
     type: 'DATA_CENTER_METRICS' as const, integrationId: input.integrationId, managementPlaneUid: input.managementPlaneUid, collectedAt: new Date(input.expectedEnd).toISOString(), platform: 'VSPHERE' as const, metricSet: input.metricSet,
     metrics: input.facts.map((fact) => {
       const semanticMetric = VCENTER_CANONICAL_SEMANTIC[fact.semantic]; if (!semanticMetric) throw new VCenterConnectorError('vcenter_metric_semantic_unmapped', `vCenter semantic ${fact.semantic} is not mapped to the canonical registry.`, false);
-      return { assetKind: assetKind(fact.entity), sourceUid: fact.entity.value, semanticMetric, nativeMetric: fact.semantic, observedAt: fact.observedAt, intervalSeconds: fact.intervalSeconds, value: fact.value, unit: fact.unit, aggregation: fact.aggregation.toUpperCase(), retentionClass: 'TELEMETRY' as const, retentionDays: 90, provenance: { counterId: fact.counterId, entityType: fact.entity.type } };
+      return { assetKind: assetKind(fact.entity), sourceUid: canonicalSourceUid(fact.assetId), semanticMetric, nativeMetric: fact.semantic, observedAt: fact.observedAt, intervalSeconds: fact.intervalSeconds, value: fact.value, unit: fact.unit, aggregation: fact.aggregation.toUpperCase(), retentionClass: 'TELEMETRY' as const, retentionDays: 90, provenance: { counterId: fact.counterId, entityType: fact.entity.type, sourceManagedObjectReference: fact.entity.value } };
     }),
-    gaps: input.gaps.map((gap) => ({ assetKind: assetKind(gap.entity), sourceUid: gap.entity.value, semanticMetric: VCENTER_CANONICAL_SEMANTIC[gap.semantic] ?? gap.semantic, expectedStart: new Date(input.expectedStart).toISOString(), expectedEnd: new Date(input.expectedEnd).toISOString(), reasonClass: gap.reason, retryable: gap.reason === 'SERIES_NOT_RETURNED', state: 'OPEN' as const, evidence: gap.evidence })),
+    gaps: input.gaps.map((gap) => ({ assetKind: assetKind(gap.entity), sourceUid: canonicalSourceUid(gap.assetId), semanticMetric: VCENTER_CANONICAL_SEMANTIC[gap.semantic] ?? gap.semantic, expectedStart: new Date(input.expectedStart).toISOString(), expectedEnd: new Date(input.expectedEnd).toISOString(), reasonClass: gap.reason, retryable: gap.reason === 'SERIES_NOT_RETURNED', state: 'OPEN' as const, evidence: { ...gap.evidence, sourceManagedObjectReference: gap.entity.value } })),
   };
 }
