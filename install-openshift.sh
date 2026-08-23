@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 CONTROL_PLANE_URL=""; ORG_ID=""; INTEGRATION_ID=""; SCALE_CLASS=""; ENROLLMENT_TOKEN=""
-IMAGE="${COLLECTOR_IMAGE:-ghcr.io/cloudverse-pte-ltd/cloudverse-data-center-collector@sha256:b7fc5ba4e7451a5290a543ea8cfcf56989364eb7e31787381532ac03632c25f8}"
+IMAGE="${COLLECTOR_IMAGE:-ghcr.io/cloudverse-pte-ltd/cloudverse-data-center-collector@sha256:962da5285dd89640efee14cf4371218a5ccd63f3c8cb432ff49e9f79f98bf44c}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --control-plane-url) CONTROL_PLANE_URL="$2"; shift 2 ;;
