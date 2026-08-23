@@ -6,22 +6,34 @@ const response = (body: string, headers?: HeadersInit) => new Response(soap(body
 
 describe('vCenter PropertyCollector paging', () => {
   it('logs in and consumes RetrievePropertiesEx continuation tokens without truncation', async () => {
+    let activeType = '';
     const fetchImpl = vi.fn<typeof fetch>(async (_input, init) => {
       const body = String(init?.body);
-      if (body.includes('RetrieveServiceContent')) return response('<RetrieveServiceContentResponse><returnval><sessionManager type="SessionManager">SessionManager</sessionManager><propertyCollector type="PropertyCollector">propertyCollector</propertyCollector><rootFolder type="Folder">group-root-42</rootFolder></returnval></RetrieveServiceContentResponse>', { 'set-cookie': 'vmware_soap_session=abc; Path=/; Secure' });
+      if (body.includes('RetrieveServiceContent')) return response('<RetrieveServiceContentResponse><returnval><sessionManager type="SessionManager">SessionManager</sessionManager><propertyCollector type="PropertyCollector">propertyCollector</propertyCollector><rootFolder type="Folder">group-root-42</rootFolder><viewManager type="ViewManager">ViewManager</viewManager></returnval></RetrieveServiceContentResponse>', { 'set-cookie': 'vmware_soap_session=abc; Path=/; Secure' });
       if (body.includes('<vim25:Login>')) return response('<LoginResponse><returnval><key>session-key</key></returnval></LoginResponse>');
-      if (body.includes('ContinueRetrievePropertiesEx')) return response('<ContinueRetrievePropertiesExResponse><returnval><objects><obj type="VirtualMachine">vm-2</obj><propSet><name>name</name><val>ordinary-vm-2</val></propSet></objects></returnval></ContinueRetrievePropertiesExResponse>');
+      if (body.includes('<vim25:CreateContainerView>')) {
+        activeType = body.match(/<vim25:type>([^<]+)<\/vim25:type>/)?.[1] ?? '';
+        return response(`<CreateContainerViewResponse><returnval type="ContainerView">session-view-${activeType}</returnval></CreateContainerViewResponse>`);
+      }
+      if (body.includes('<vim25:DestroyView>')) return response('<DestroyViewResponse/>');
+      if (body.includes('ContinueRetrievePropertiesEx') && activeType === 'VirtualMachine') return response('<ContinueRetrievePropertiesExResponse><returnval><objects><obj type="VirtualMachine">vm-2</obj><propSet><name>name</name><val>ordinary-vm-2</val></propSet></objects></returnval></ContinueRetrievePropertiesExResponse>');
+      if (activeType === 'Network' || activeType === 'DistributedVirtualPortgroup') return response('<RetrievePropertiesExResponse><returnval><objects><obj type="DistributedVirtualPortgroup">dvportgroup-42</obj><propSet><name>name</name><val>production-dvpg</val></propSet></objects></returnval></RetrievePropertiesExResponse>');
+      if (activeType !== 'VirtualMachine') return response('<RetrievePropertiesExResponse><returnval/></RetrievePropertiesExResponse>');
       return response('<RetrievePropertiesExResponse><returnval><objects><obj type="VirtualMachine">vm-1</obj><propSet><name>name</name><val>ordinary-vm-1</val></propSet></objects><token>next-page</token></returnval></RetrievePropertiesExResponse>');
     });
     const result = await collectWithPropertyCollector({ baseUrl: 'https://vcenter.example.test', username: 'reader', password: 'secret', fetchImpl, pageSize: 1 });
-    expect(result.pages).toBe(2);
-    expect(result.objects.map((object) => object.value)).toEqual(['vm-1', 'vm-2']);
+    expect(result.pages).toBe(10);
+    expect(result.objects.map((object) => object.value)).toEqual(['vm-1', 'vm-2', 'dvportgroup-42']);
+    expect(result.objects.filter((object) => object.value === 'dvportgroup-42')).toHaveLength(1);
     expect(result.objects[0].properties.name).toBe('ordinary-vm-1');
-    expect(String(fetchImpl.mock.calls[2][1]?.body)).toContain('<vim25:maxObjects>1</vim25:maxObjects>');
-    expect(String(fetchImpl.mock.calls[2][1]?.body)).toContain('group-root-42');
-    expect(String(fetchImpl.mock.calls[2][1]?.body)).toContain('<vim25:type>DistributedVirtualPortgroup</vim25:type>');
-    expect(String(fetchImpl.mock.calls[2][1]?.body)).toContain('<vim25:pathSet>config.distributedVirtualSwitch</vim25:pathSet>');
-    expect((fetchImpl.mock.calls[2][1]?.headers as Record<string, string>).Cookie).toBe('vmware_soap_session=abc');
+    expect(String(fetchImpl.mock.calls[2][1]?.body)).toContain('<vim25:recursive>true</vim25:recursive>');
+    const retrieveCall = fetchImpl.mock.calls.find(([, init]) => String(init?.body).includes('<vim25:maxObjects>1</vim25:maxObjects>'))!;
+    expect(String(retrieveCall[1]?.body)).toContain('session-view-Folder');
+    expect(String(retrieveCall[1]?.body)).toContain('<vim25:type>DistributedVirtualPortgroup</vim25:type>');
+    expect(String(retrieveCall[1]?.body)).toContain('<vim25:pathSet>config.distributedVirtualSwitch</vim25:pathSet>');
+    expect(String(retrieveCall[1]?.body)).toContain('<vim25:type>ContainerView</vim25:type><vim25:path>view</vim25:path>');
+    expect((retrieveCall[1]?.headers as Record<string, string>).Cookie).toBe('vmware_soap_session=abc');
+    expect(fetchImpl.mock.calls.some(([, init]) => String(init?.body).includes('<vim25:DestroyView>'))).toBe(true);
   });
 
   it('normalizes full VM, host, cluster and datastore topology with immutable source identities', () => {
@@ -124,8 +136,11 @@ describe('C30 bounded vCenter PerformanceManager collection', () => {
     ], semantics: ['cpu.usage.average'], startTime: '2026-08-21T00:00:00Z', endTime: '2026-08-21T01:00:00Z', intervalId: 1, fetchImpl });
     expect(result).toMatchObject({ requests: 2, points: 4, gaps: [] });
     expect(result.facts).toEqual(expect.arrayContaining([expect.objectContaining({ assetId: 'asset-1', counterId: 2, intervalSeconds: 300, semantic: 'cpu.usage.average' })]));
-    expect(String(fetchImpl.mock.calls[2][1]?.body)).toContain('<vim25:counterId>2</vim25:counterId>');
-    expect(String(fetchImpl.mock.calls[2][1]?.body)).toContain('<vim25:intervalId>300</vim25:intervalId>');
+    const queryBody = String(fetchImpl.mock.calls[2][1]?.body);
+    expect(queryBody).toContain('<vim25:counterId>2</vim25:counterId>');
+    expect(queryBody).toContain('<vim25:intervalId>300</vim25:intervalId>');
+    expect(queryBody.indexOf('<vim25:startTime>')).toBeLessThan(queryBody.indexOf('<vim25:metricId>'));
+    expect(queryBody.indexOf('<vim25:endTime>')).toBeLessThan(queryBody.indexOf('<vim25:metricId>'));
   });
 
   it('fails closed on unprobed counters, disabled intervals and unsafe windows', async () => {
@@ -148,13 +163,20 @@ describe('C30 bounded vCenter PerformanceManager collection', () => {
 
 describe('vCenter released in-estate adapter golden path', () => {
   it('emits inventory and requested telemetry joined by the same immutable source UID', async () => {
+    let activeType = '';
     const fetchImpl = vi.fn<typeof fetch>(async (_input, init) => {
       const body = String(init?.body);
-      if (body.includes('RetrieveServiceContent')) return response('<RetrieveServiceContentResponse><returnval><sessionManager type="SessionManager">SessionManager</sessionManager><propertyCollector type="PropertyCollector">propertyCollector</propertyCollector><rootFolder type="Folder">group-root</rootFolder><perfManager type="PerformanceManager">PerfMgr</perfManager><setting type="OptionManager">VpxSettings</setting><about><instanceUuid>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</instanceUuid><productLineId>vpx</productLineId><version>9.0.0.0</version><build>24734770</build><apiType>VirtualCenter</apiType></about></returnval></RetrieveServiceContentResponse>', { 'set-cookie': 'vmware_soap_session=adapter; Path=/; Secure' });
+      if (body.includes('RetrieveServiceContent')) return response('<RetrieveServiceContentResponse><returnval><sessionManager type="SessionManager">SessionManager</sessionManager><propertyCollector type="PropertyCollector">propertyCollector</propertyCollector><rootFolder type="Folder">group-root</rootFolder><viewManager type="ViewManager">ViewManager</viewManager><perfManager type="PerformanceManager">PerfMgr</perfManager><setting type="OptionManager">VpxSettings</setting><about><instanceUuid>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</instanceUuid><productLineId>vpx</productLineId><version>9.0.0.0</version><build>24734770</build><apiType>VirtualCenter</apiType></about></returnval></RetrieveServiceContentResponse>', { 'set-cookie': 'vmware_soap_session=adapter; Path=/; Secure' });
       if (body.includes('<vim25:Login>')) return response('<LoginResponse/>');
+      if (body.includes('<vim25:CreateContainerView>')) {
+        activeType = body.match(/<vim25:type>([^<]+)<\/vim25:type>/)?.[1] ?? '';
+        return response(`<CreateContainerViewResponse><returnval type="ContainerView">session-view-${activeType}</returnval></CreateContainerViewResponse>`);
+      }
+      if (body.includes('<vim25:DestroyView>')) return response('<DestroyViewResponse/>');
       if (body.includes('<vim25:QueryOptions>')) return response('<QueryOptionsResponse><returnval><key>config.vpxd.stats.maxQueryMetrics</key><value>64</value></returnval></QueryOptionsResponse>');
       if (body.includes('<vim25:QueryPerf>')) return response('<QueryPerfResponse><returnval><entity type="VirtualMachine">vm-42</entity><sampleInfoCSV>300,2026-08-21T00:05:00Z</sampleInfoCSV><value><id><counterId>2</counterId><instance></instance></id><value>12.5</value></value></returnval></QueryPerfResponse>');
       if (body.includes('<vim25:obj type="PerformanceManager">')) return response('<RetrievePropertiesExResponse><returnval><objects><obj type="PerformanceManager">PerfMgr</obj><propSet><name>perfCounter</name><val><perfCounter><key>2</key><nameInfo><key>usage</key></nameInfo><groupInfo><key>cpu</key></groupInfo><unitInfo><key>percent</key></unitInfo><rollupType>average</rollupType><statsType>rate</statsType><level>1</level><perDeviceLevel>3</perDeviceLevel></perfCounter></val></propSet><propSet><name>historicalInterval</name><val><historicalInterval><key>1</key><name>Past day</name><samplingPeriod>300</samplingPeriod><length>86400</length><level>1</level><enabled>true</enabled></historicalInterval></val></propSet></objects></returnval></RetrievePropertiesExResponse>');
+      if (activeType !== 'VirtualMachine') return response('<RetrievePropertiesExResponse><returnval/></RetrievePropertiesExResponse>');
       return response('<RetrievePropertiesExResponse><returnval><objects><obj type="VirtualMachine">vm-42</obj><propSet><name>name</name><val>app-01</val></propSet><propSet><name>config.instanceUuid</name><val>cccccccc-cccc-4ccc-8ccc-cccccccccccc</val></propSet></objects></returnval></RetrievePropertiesExResponse>');
     });
     const adapter = new VCenterInEstateAdapter(fetchImpl);

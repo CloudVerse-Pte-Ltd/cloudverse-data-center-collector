@@ -188,11 +188,14 @@ function readResult(xml: string): { objects: PropertyCollectorObject[]; token?: 
   const body = parsed?.Envelope?.Body;
   if (body?.Fault) throw new VCenterConnectorError('vcenter_soap_fault', body.Fault?.faultstring ?? 'vCenter SOAP fault.', false);
   const result = body?.RetrievePropertiesExResponse?.returnval ?? body?.ContinueRetrievePropertiesExResponse?.returnval;
-  const objects = (result?.objects ?? []).map((entry: any) => ({
+  const rawObjects = result?.objects;
+  const objects = (Array.isArray(rawObjects) ? rawObjects : rawObjects ? [rawObjects] : []).map((entry: any) => ({
     type: String(entry?.obj?.['@_type'] ?? ''), value: String(entry?.obj?.['#text'] ?? entry?.obj ?? ''),
-    properties: Object.fromEntries((entry?.propSet ?? []).map((prop: any) => [String(prop?.name), prop?.val])),
+    properties: Object.fromEntries((Array.isArray(entry?.propSet) ? entry.propSet : entry?.propSet ? [entry.propSet] : []).map((prop: any) => [String(prop?.name), prop?.val])),
   }));
-  return { objects, token: typeof result?.token === 'string' && result.token ? result.token : undefined };
+  const tokenValue = result?.token;
+  const token = String(tokenValue?.['#text'] ?? tokenValue ?? '').trim();
+  return { objects, token: token || undefined };
 }
 
 function propertySpec(): string {
@@ -209,7 +212,7 @@ function propertySpec(): string {
   return Object.entries(specs).map(([type, paths]) => `<vim25:propSet><vim25:type>${type}</vim25:type><vim25:all>false</vim25:all>${paths.map((path) => `<vim25:pathSet>${path}</vim25:pathSet>`).join('')}</vim25:propSet>`).join('');
 }
 
-const traversal = (rootFolder: string) => `<vim25:objectSet><vim25:obj type="Folder">${escapeXml(rootFolder)}</vim25:obj><vim25:skip>false</vim25:skip><vim25:selectSet xsi:type="vim25:TraversalSpec" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><vim25:name>visitFolders</vim25:name><vim25:type>Folder</vim25:type><vim25:path>childEntity</vim25:path><vim25:skip>false</vim25:skip><vim25:selectSet><vim25:name>visitFolders</vim25:name></vim25:selectSet><vim25:selectSet xsi:type="vim25:TraversalSpec"><vim25:name>dcToHf</vim25:name><vim25:type>Datacenter</vim25:type><vim25:path>hostFolder</vim25:path><vim25:skip>false</vim25:skip><vim25:selectSet><vim25:name>visitFolders</vim25:name></vim25:selectSet></vim25:selectSet><vim25:selectSet xsi:type="vim25:TraversalSpec"><vim25:name>dcToVmf</vim25:name><vim25:type>Datacenter</vim25:type><vim25:path>vmFolder</vim25:path><vim25:skip>false</vim25:skip><vim25:selectSet><vim25:name>visitFolders</vim25:name></vim25:selectSet></vim25:selectSet><vim25:selectSet xsi:type="vim25:TraversalSpec"><vim25:name>dcToDsf</vim25:name><vim25:type>Datacenter</vim25:type><vim25:path>datastoreFolder</vim25:path><vim25:skip>false</vim25:skip><vim25:selectSet><vim25:name>visitFolders</vim25:name></vim25:selectSet></vim25:selectSet><vim25:selectSet xsi:type="vim25:TraversalSpec"><vim25:name>dcToNwf</vim25:name><vim25:type>Datacenter</vim25:type><vim25:path>networkFolder</vim25:path><vim25:skip>false</vim25:skip><vim25:selectSet><vim25:name>visitFolders</vim25:name></vim25:selectSet></vim25:selectSet><vim25:selectSet xsi:type="vim25:TraversalSpec"><vim25:name>crToH</vim25:name><vim25:type>ComputeResource</vim25:type><vim25:path>host</vim25:path><vim25:skip>false</vim25:skip></vim25:selectSet><vim25:selectSet xsi:type="vim25:TraversalSpec"><vim25:name>crToRp</vim25:name><vim25:type>ComputeResource</vim25:type><vim25:path>resourcePool</vim25:path><vim25:skip>false</vim25:skip><vim25:selectSet><vim25:name>rpToRp</vim25:name></vim25:selectSet><vim25:selectSet><vim25:name>rpToVm</vim25:name></vim25:selectSet></vim25:selectSet><vim25:selectSet xsi:type="vim25:TraversalSpec"><vim25:name>rpToRp</vim25:name><vim25:type>ResourcePool</vim25:type><vim25:path>resourcePool</vim25:path><vim25:skip>false</vim25:skip><vim25:selectSet><vim25:name>rpToRp</vim25:name></vim25:selectSet><vim25:selectSet><vim25:name>rpToVm</vim25:name></vim25:selectSet></vim25:selectSet><vim25:selectSet xsi:type="vim25:TraversalSpec"><vim25:name>rpToVm</vim25:name><vim25:type>ResourcePool</vim25:type><vim25:path>vm</vim25:path><vim25:skip>false</vim25:skip></vim25:selectSet></vim25:selectSet></vim25:objectSet>`;
+const containerViewTraversal = (view: string) => `<vim25:objectSet><vim25:obj type="ContainerView">${escapeXml(view)}</vim25:obj><vim25:skip>true</vim25:skip><vim25:selectSet xsi:type="vim25:TraversalSpec" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><vim25:name>containerViewToObjects</vim25:name><vim25:type>ContainerView</vim25:type><vim25:path>view</vim25:path><vim25:skip>false</vim25:skip></vim25:selectSet></vim25:objectSet>`;
 
 export async function collectWithPropertyCollector(input: {
   baseUrl: string; username: string; password: string; fetchImpl?: typeof fetch; pageSize?: number;
@@ -229,18 +232,33 @@ export async function collectWithPropertyCollector(input: {
   const sessionManager = String(service?.sessionManager?.['#text'] ?? service?.sessionManager);
   const propertyCollector = String(service?.propertyCollector?.['#text'] ?? service?.propertyCollector);
   const rootFolder = String(service?.rootFolder?.['#text'] ?? service?.rootFolder);
+  const viewManager = String(service?.viewManager?.['#text'] ?? service?.viewManager);
+  if (!sessionManager || !propertyCollector || !rootFolder || !viewManager) throw new VCenterConnectorError('vcenter_inventory_managers_unavailable', 'vCenter did not expose the required session, property, root-folder, and view managers.', false);
   await call(`<vim25:Login><vim25:_this type="SessionManager">${escapeXml(sessionManager)}</vim25:_this><vim25:userName>${escapeXml(input.username)}</vim25:userName><vim25:password>${escapeXml(input.password)}</vim25:password></vim25:Login>`);
-  const first = await call(`<vim25:RetrievePropertiesEx><vim25:_this type="PropertyCollector">${escapeXml(propertyCollector)}</vim25:_this><vim25:specSet>${propertySpec()}${traversal(rootFolder)}</vim25:specSet><vim25:options><vim25:maxObjects>${input.pageSize ?? 500}</vim25:maxObjects></vim25:options></vim25:RetrievePropertiesEx>`);
+  const types = ['Folder', 'Datacenter', 'ClusterComputeResource', 'ResourcePool', 'HostSystem', 'VirtualMachine', 'Datastore', 'Network', 'DistributedVirtualPortgroup'];
   const objects: PropertyCollectorObject[] = [];
-  let page = readResult(first); let pages = 1; objects.push(...page.objects);
-  const tokens = new Set<string>();
-  while (page.token) {
-    if (pages >= 10_000 || tokens.has(page.token)) throw new VCenterConnectorError('vcenter_cursor_cycle', 'PropertyCollector token limit/cycle detected.', false);
-    tokens.add(page.token);
-    page = readResult(await call(`<vim25:ContinueRetrievePropertiesEx><vim25:_this type="PropertyCollector">${escapeXml(propertyCollector)}</vim25:_this><vim25:token>${escapeXml(page.token)}</vim25:token></vim25:ContinueRetrievePropertiesEx>`));
-    objects.push(...page.objects); pages += 1;
+  let pages = 0;
+  for (const type of types) {
+    const viewResponse = parser.parse(await call(`<vim25:CreateContainerView><vim25:_this type="ViewManager">${escapeXml(viewManager)}</vim25:_this><vim25:container type="Folder">${escapeXml(rootFolder)}</vim25:container><vim25:type>${type}</vim25:type><vim25:recursive>true</vim25:recursive></vim25:CreateContainerView>`));
+    const viewValue = viewResponse?.Envelope?.Body?.CreateContainerViewResponse?.returnval;
+    const view = String(viewValue?.['#text'] ?? viewValue ?? '');
+    if (!view) throw new VCenterConnectorError('vcenter_container_view_unavailable', `vCenter did not create the recursive ${type} ContainerView.`, false);
+    try {
+      const first = await call(`<vim25:RetrievePropertiesEx><vim25:_this type="PropertyCollector">${escapeXml(propertyCollector)}</vim25:_this><vim25:specSet>${propertySpec()}${containerViewTraversal(view)}</vim25:specSet><vim25:options><vim25:maxObjects>${input.pageSize ?? 500}</vim25:maxObjects></vim25:options></vim25:RetrievePropertiesEx>`);
+      let page = readResult(first); pages += 1; objects.push(...page.objects);
+      const tokens = new Set<string>();
+      while (page.token) {
+        if (pages >= 10_000 || tokens.has(page.token)) throw new VCenterConnectorError('vcenter_cursor_cycle', 'PropertyCollector token limit/cycle detected.', false);
+        tokens.add(page.token);
+        page = readResult(await call(`<vim25:ContinueRetrievePropertiesEx><vim25:_this type="PropertyCollector">${escapeXml(propertyCollector)}</vim25:_this><vim25:token>${escapeXml(page.token)}</vim25:token></vim25:ContinueRetrievePropertiesEx>`));
+        objects.push(...page.objects); pages += 1;
+      }
+    } finally {
+      await call(`<vim25:DestroyView><vim25:_this type="ContainerView">${escapeXml(view)}</vim25:_this></vim25:DestroyView>`).catch(() => undefined);
+    }
   }
-  return { objects, pages };
+  const uniqueObjects = [...new Map(objects.map((object) => [`${object.type}:${object.value}`, object])).values()];
+  return { objects: uniqueObjects, pages };
 }
 
 const propertyText = (value: unknown): string => {
@@ -500,7 +518,13 @@ export async function collectVCenterPerformance(input: {
   const call = async (body: string) => {
     const response = await fetchImpl(url, { method: 'POST', headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: 'urn:vim25/8.0.3', ...(cookie ? { Cookie: cookie } : {}) }, body: envelope(body) });
     const setCookie = response.headers.get('set-cookie'); if (setCookie) cookie = setCookie.split(';')[0];
-    const xml = await response.text(); if (!response.ok) throw new VCenterConnectorError('vcenter_soap_failed', `vCenter SOAP request failed with HTTP ${response.status}.`, response.status >= 500); return xml;
+    const xml = await response.text();
+    if (!response.ok) {
+      const fault = parser.parse(xml)?.Envelope?.Body?.Fault;
+      const detail = text(fault?.faultstring).trim();
+      throw new VCenterConnectorError('vcenter_soap_failed', `vCenter SOAP request failed with HTTP ${response.status}${detail ? `: ${detail}` : ''}.`, response.status >= 500);
+    }
+    return xml;
   };
   const content = parser.parse(await call('<vim25:RetrieveServiceContent><vim25:_this type="ServiceInstance">ServiceInstance</vim25:_this></vim25:RetrieveServiceContent>'));
   const service = content?.Envelope?.Body?.RetrieveServiceContentResponse?.returnval; const sessionManager = text(service?.sessionManager); const perfManager = text(service?.perfManager);
@@ -509,7 +533,7 @@ export async function collectVCenterPerformance(input: {
   const facts: VCenterPerformanceFact[] = []; const gaps: VCenterPerformanceGap[] = []; let requests = 0;
   for (let offset = 0; offset < input.entities.length; offset += entityBatchSize) {
     const batch = input.entities.slice(offset, offset + entityBatchSize);
-    const specs = batch.map((entity) => `<vim25:querySpec><vim25:entity type="${entity.type}">${escapeXml(entity.value)}</vim25:entity>${counters.map((counter) => `<vim25:metricId><vim25:counterId>${counter.key}</vim25:counterId><vim25:instance></vim25:instance></vim25:metricId>`).join('')}<vim25:startTime>${start.toISOString()}</vim25:startTime><vim25:endTime>${end.toISOString()}</vim25:endTime><vim25:intervalId>${interval.samplingPeriodSeconds}</vim25:intervalId><vim25:format>csv</vim25:format></vim25:querySpec>`).join('');
+    const specs = batch.map((entity) => `<vim25:querySpec><vim25:entity type="${entity.type}">${escapeXml(entity.value)}</vim25:entity><vim25:startTime>${start.toISOString()}</vim25:startTime><vim25:endTime>${end.toISOString()}</vim25:endTime>${counters.map((counter) => `<vim25:metricId><vim25:counterId>${counter.key}</vim25:counterId><vim25:instance></vim25:instance></vim25:metricId>`).join('')}<vim25:intervalId>${interval.samplingPeriodSeconds}</vim25:intervalId><vim25:format>csv</vim25:format></vim25:querySpec>`).join('');
     const parsed = parser.parse(await call(`<vim25:QueryPerf><vim25:_this type="PerformanceManager">${escapeXml(perfManager)}</vim25:_this>${specs}</vim25:QueryPerf>`)); requests += 1;
     const rawRows = parsed?.Envelope?.Body?.QueryPerfResponse?.returnval; const rows = Array.isArray(rawRows) ? rawRows : rawRows ? [rawRows] : [];
     const returned = new Set<string>();
