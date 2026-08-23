@@ -14,7 +14,7 @@ describe('OpenShift Virtualization connector', () => {
       const path = new URL(String(input)).pathname;
       if (path === '/version') return response({ gitVersion: 'v1.31.4' });
       if (path === '/apis') return response({ groups: [{ name: 'kubevirt.io' }] });
-      if (path.endsWith('/infrastructures/cluster')) return response({ metadata: { uid: 'infra-uid' } });
+      if (path.endsWith('/infrastructures/cluster')) return response({ metadata: { uid: 'infra-uid' }, status: { infrastructureName: 'payments-ocp' } });
       return response({});
     });
     await createOpenShiftVirtualizationClient(config, { fetchImpl, sourceConcurrency: 2 }).discover();
@@ -29,11 +29,11 @@ describe('OpenShift Virtualization connector', () => {
       if (path === '/apis/subresources.kubevirt.io/v1') return response({ groupVersion: 'subresources.kubevirt.io/v1', resources: [{ name: 'virtualmachineinstances/console', kind: 'VirtualMachineInstance', namespaced: true, verbs: ['get'] }] });
       if (path.endsWith('/clusteroperators/version')) return response({ status: { history: [{ version: '4.18.2', state: 'Completed' }] } });
       if (path.endsWith('/selfsubjectrulesreviews')) return response({ status: { resourceRules: [{ resources: ['virtualmachines', 'virtualmachineinstances', 'virtualmachineinstancemigrations', 'datavolumes', 'persistentvolumeclaims'], verbs: ['get', 'list', 'watch'] }] } });
-      if (path.endsWith('/infrastructures/cluster')) return response({ metadata: { uid: 'infra-uid' } });
+      if (path.endsWith('/infrastructures/cluster')) return response({ metadata: { uid: 'infra-uid' }, status: { infrastructureName: 'payments-ocp' } });
       return response({}, 404);
     });
     const discovered = await createOpenShiftVirtualizationClient(config, { fetchImpl }).discover();
-    expect(discovered).toMatchObject({ platform: 'OPENSHIFT', kubernetesVersion: 'v1.31.4', openshiftVersion: '4.18.2', managementPlaneUid: 'infra-uid', identityStatus: 'READY', kubeVirt: { present: true, version: 'subresources.kubevirt.io/v1' } });
+    expect(discovered).toMatchObject({ platform: 'OPENSHIFT', kubernetesVersion: 'v1.31.4', openshiftVersion: '4.18.2', managementPlaneUid: 'infra-uid', clusterName: 'payments-ocp', identityStatus: 'READY', kubeVirt: { present: true, version: 'subresources.kubevirt.io/v1' } });
     expect(discovered.permissionChecks.every((check) => check.allowed)).toBe(true);
     expect(JSON.stringify(discovered)).not.toContain('secret-token');
   });
@@ -129,6 +129,10 @@ describe('OpenShift Virtualization connector', () => {
     const result = await collectOpenShiftVirtualizationGraph(config, context, { fetchImpl });
     expect(result.errors).toEqual([]);
     expect(result.records[0]).toMatchObject({ type: 'OPENSHIFT_VIRTUALIZATION_GRAPH', integrationId: 3, managementPlaneUid: 'openshift:infra-uid' });
+    expect(result.records[0].resources[0]).toMatchObject({
+      id: '_cluster/Cluster/infra-uid', uid: 'infra-uid', kind: 'Cluster',
+      attributes: { kubernetesVersion: 'v1.31.4', openshiftVersion: '4.18.2' },
+    });
     expect(result.capabilities.find((capability) => capability.capability === 'DISCOVER_INVENTORY')?.status).toBe('READY');
 
     const mismatch = await collectOpenShiftVirtualizationGraph(config, { ...context, managementPlaneUid: 'openshift:wrong' }, { fetchImpl });

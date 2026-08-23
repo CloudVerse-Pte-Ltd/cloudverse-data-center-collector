@@ -17,7 +17,11 @@ export interface OpenShiftVirtualizationGraphEnvelope {
   managementPlaneUid: string;
   collectedAt: string;
   coverage: { scope: 'CLUSTER' | 'NAMESPACES'; namespaces: string[] };
-  resources: ReturnType<typeof normalizeOpenShiftVirtualizationInventory>['resources'];
+  resources: Array<ReturnType<typeof normalizeOpenShiftVirtualizationInventory>['resources'][number] | {
+    id: string; uid: string; kind: 'Cluster'; name: string; namespace: ''; ownerIds: string[];
+    labels: Record<string, never>; annotations: Record<string, never>;
+    attributes: Record<string, unknown>;
+  }>;
   relationships: ReturnType<typeof normalizeOpenShiftVirtualizationInventory>['relationships'];
 }
 
@@ -44,7 +48,24 @@ export async function collectOpenShiftVirtualizationGraph(
   const graph = normalizeOpenShiftVirtualizationInventory(collected.inventory);
   const integrationId = Number(context.integrationId);
   if (!Number.isSafeInteger(integrationId) || integrationId <= 0) throw new Error('OpenShift integrationId must be a positive integer');
-  const envelope: OpenShiftVirtualizationGraphEnvelope = { type: 'OPENSHIFT_VIRTUALIZATION_GRAPH', integrationId, managementPlaneUid: context.managementPlaneUid, collectedAt: context.collectedAt, coverage: collected.coverage, resources: graph.resources, relationships: graph.relationships };
+  const clusterUid = discovered.managementPlaneUid!;
+  const clusterName = discovered.clusterName || `openshift-${clusterUid.slice(0, 12)}`;
+  const cluster = {
+    id: `_cluster/Cluster/${clusterUid}`,
+    uid: clusterUid,
+    kind: 'Cluster' as const,
+    name: clusterName,
+    namespace: '' as const,
+    ownerIds: [],
+    labels: {},
+    annotations: {},
+    attributes: {
+      kubernetesVersion: discovered.kubernetesVersion,
+      openshiftVersion: discovered.openshiftVersion,
+      kubeVirtVersion: discovered.kubeVirt.version,
+    },
+  };
+  const envelope: OpenShiftVirtualizationGraphEnvelope = { type: 'OPENSHIFT_VIRTUALIZATION_GRAPH', integrationId, managementPlaneUid: context.managementPlaneUid, collectedAt: context.collectedAt, coverage: collected.coverage, resources: [cluster, ...graph.resources], relationships: graph.relationships };
   return {
     records: [envelope],
     errors: collected.failures.map((failure) => ({ code: failure.code, message: failure.message, retryable: false, details: { resource: failure.resource, path: failure.path, status: failure.status } })),

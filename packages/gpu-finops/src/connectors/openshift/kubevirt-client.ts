@@ -24,6 +24,7 @@ export interface OpenShiftVirtualizationCapability {
   };
   permissionChecks: Array<{ resource: string; verb: 'get' | 'list' | 'watch'; allowed: boolean }>;
   managementPlaneUid?: string;
+  clusterName?: string;
   identityStatus: 'READY' | 'BLOCKED';
 }
 
@@ -175,6 +176,11 @@ export function createOpenShiftVirtualizationClient(
         kubeVirt: { present: groupNames.includes('kubevirt.io'), version: String(kubevirt.groupVersion ?? '') || undefined, resources },
         permissionChecks: checks,
         managementPlaneUid: typeof map(infrastructure.metadata).uid === 'string' ? String(map(infrastructure.metadata).uid) : undefined,
+        clusterName: typeof map(infrastructure.status).infrastructureName === 'string'
+          ? String(map(infrastructure.status).infrastructureName)
+          : typeof map(infrastructure.metadata).name === 'string'
+            ? String(map(infrastructure.metadata).name)
+            : undefined,
         identityStatus: typeof map(infrastructure.metadata).uid === 'string' ? 'READY' : 'BLOCKED',
       };
     },
