@@ -17,5 +17,9 @@ describe('public installer contract', () => {
     }
     expect(source).toContain('storage: $SPOOL_SIZE')
     expect(source).toContain('COLLECTOR_SCALE_CLASS, value: "$SCALE_CLASS"')
+    expect(source).toContain('strategy: {type: Recreate}')
+    expect(source).toContain('NODE_EXTRA_CA_CERTS, value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt')
+    expect(source).toContain('oc auth can-i create clusterroles.rbac.authorization.k8s.io')
+    expect(source).not.toContain('oc new-project cloudverse-system')
   });
 });

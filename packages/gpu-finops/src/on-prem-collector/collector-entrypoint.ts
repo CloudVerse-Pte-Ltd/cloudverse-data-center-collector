@@ -4,6 +4,7 @@ import { createOpenShiftVirtualizationClient, OpenShiftVirtualizationInEstateAda
 import { discoverVCenterServiceIdentity, VCenterInEstateAdapter } from '../connectors/vcenter/index.js';
 import { collectorStatePaths, DataCenterBundleSigner, destroyEnrollmentTokenFile, EncryptedBundleQueue, enrollCollector, InEstateCollectorSupervisor, OnPremCollectorWorker, startCollectorRun } from './index.js';
 import { collectorSpoolBudget } from './scale-budget.js';
+import { canonicalManagementPlaneUid, deliverTerminalFailure } from './runtime-contract.js';
 
 const required = (name: string) => {
   const value = process.env[name]?.trim();
@@ -60,6 +61,13 @@ async function main() {
   if (String(process.env.COLLECTOR_ROTATE_SPOOL_ON_START ?? 'false').toLowerCase() === 'true') await queue.rotateToPrimaryKey()
   const tokenFile = process.env.COLLECTOR_BEARER_TOKEN_FILE?.trim() || statePaths.transportToken;
   const bearerToken = (await readFile(tokenFile, 'utf8')).trim();
+  const worker = mode === 'OFFLINE' ? null : new OnPremCollectorWorker(queue, {
+    endpoint: process.env.COLLECTOR_INGESTION_ENDPOINT ?? `${required('COLLECTOR_CONTROL_PLANE_URL').replace(/\/$/, '')}/bundles/push`, allowedHosts: list('COLLECTOR_ALLOWED_HOSTS'),
+    privateAddressAllowedHosts: list('COLLECTOR_PRIVATE_ADDRESS_ALLOWED_HOSTS'),
+    bearerToken,
+    proxyUrl: process.env.COLLECTOR_PROXY_URL, proxyAllowedHosts: list('COLLECTOR_PROXY_ALLOWED_HOSTS'),
+    privateProxyAddressAllowedHosts: list('COLLECTOR_PRIVATE_PROXY_ADDRESS_ALLOWED_HOSTS'),
+  });
   const providerConfigFile = process.env.COLLECTOR_PROVIDER_CONFIG_FILE?.trim();
   const assignmentFile = process.env.COLLECTOR_RUN_ASSIGNMENT_FILE?.trim();
   if (providerConfigFile && String(process.env.COLLECTOR_COLLECT_ON_START ?? 'true').toLowerCase() === 'true') {
@@ -69,17 +77,18 @@ async function main() {
     if (assignmentFile) {
       assignment = JSON.parse(await readFile(assignmentFile, 'utf8'));
     } else {
-      const managementPlaneUid = provider === 'VSPHERE' || provider === 'VCENTER'
-        ? `vcenter:${(await discoverVCenterServiceIdentity({
+      const discoveredManagementPlaneUid = provider === 'VSPHERE' || provider === 'VCENTER'
+        ? (await discoverVCenterServiceIdentity({
           baseUrl: providerConfig.baseUrl,
           ...providerConfig.auth.basic,
-        })).instanceUuid.toLowerCase()}`
+        })).instanceUuid
         : provider === 'OPENSHIFT_VIRTUALIZATION'
-          ? `openshift:${(await createOpenShiftVirtualizationClient(
+          ? (await createOpenShiftVirtualizationClient(
             providerConfig.kubernetes,
             { namespaces: providerConfig.namespaces },
-          ).discover()).managementPlaneUid}`
+          ).discover()).managementPlaneUid
           : (() => { throw new Error('The Linux collector supports VSPHERE and OPENSHIFT_VIRTUALIZATION'); })();
+      const managementPlaneUid = canonicalManagementPlaneUid(provider, discoveredManagementPlaneUid);
       assignment = await startCollectorRun({
         controlPlaneUrl: required('COLLECTOR_CONTROL_PLANE_URL'),
         bearerToken,
@@ -105,15 +114,8 @@ async function main() {
       : provider === 'OPENSHIFT_VIRTUALIZATION'
         ? await supervisor.run(assignment, new OpenShiftVirtualizationInEstateAdapter(spoolBudget.sourceConcurrency), providerConfig)
         : (() => { throw new Error('COLLECTOR_PROVIDER must be VCENTER or OPENSHIFT_VIRTUALIZATION for this runtime'); })();
-    if (result.status === 'FAILED') throw new Error('Provider collection failed; signed failure evidence remains in the spool');
+    await deliverTerminalFailure(result.status, mode as 'CONNECTED' | 'STORE_FORWARD' | 'OFFLINE', worker ? () => worker.flushOnce() : undefined);
   }
-  const worker = mode === 'OFFLINE' ? null : new OnPremCollectorWorker(queue, {
-    endpoint: process.env.COLLECTOR_INGESTION_ENDPOINT ?? `${required('COLLECTOR_CONTROL_PLANE_URL').replace(/\/$/, '')}/bundles/push`, allowedHosts: list('COLLECTOR_ALLOWED_HOSTS'),
-    privateAddressAllowedHosts: list('COLLECTOR_PRIVATE_ADDRESS_ALLOWED_HOSTS'),
-    bearerToken,
-    proxyUrl: process.env.COLLECTOR_PROXY_URL, proxyAllowedHosts: list('COLLECTOR_PROXY_ALLOWED_HOSTS'),
-    privateProxyAddressAllowedHosts: list('COLLECTOR_PRIVATE_PROXY_ADDRESS_ALLOWED_HOSTS'),
-  });
   if (mode === 'OFFLINE' && process.env.COLLECTOR_OFFLINE_EXPORT_DIRECTORY) {
     const exportDirectory = process.env.COLLECTOR_OFFLINE_EXPORT_DIRECTORY;
     await mkdir(exportDirectory, { recursive: true, mode: 0o700 });

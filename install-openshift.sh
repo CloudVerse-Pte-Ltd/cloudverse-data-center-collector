@@ -27,7 +27,14 @@ case "$IMAGE" in *@sha256:*) ;; *) [ "${COLLECTOR_ALLOW_MUTABLE_IMAGE:-false}" =
 command -v oc >/dev/null 2>&1 || { echo "oc is required" >&2; exit 1; }
 API_HOST="$(printf '%s' "$CONTROL_PLANE_URL" | sed -E 's#^https://([^/]+).*$#\1#')"
 
-oc new-project cloudverse-system >/dev/null 2>&1 || oc project cloudverse-system >/dev/null
+if ! oc auth can-i create clusterroles.rbac.authorization.k8s.io >/dev/null 2>&1 ||
+  ! oc auth can-i create clusterrolebindings.rbac.authorization.k8s.io >/dev/null 2>&1; then
+  echo "CloudVerse OpenShift discovery requires an installer identity that can create the read-only cluster RBAC used for canonical cluster identity and inventory." >&2
+  exit 1
+fi
+if ! oc get namespace cloudverse-system >/dev/null 2>&1; then
+  oc create namespace cloudverse-system >/dev/null
+fi
 oc create secret generic cloudverse-collector-bootstrap --from-literal=enrollment-token="$ENROLLMENT_TOKEN" --dry-run=client -o yaml | oc apply -f -
 unset ENROLLMENT_TOKEN
 oc create configmap cloudverse-collector-config --from-literal=provider.json='{"kubernetes":{"baseUrl":"https://kubernetes.default.svc","platformHint":"OPENSHIFT","auth":{"serviceAccountTokenFile":"/var/run/secrets/kubernetes.io/serviceaccount/token"}}}' --dry-run=client -o yaml | oc apply -f -
@@ -84,6 +91,7 @@ kind: Deployment
 metadata: {name: cloudverse-data-center-collector, namespace: cloudverse-system}
 spec:
   replicas: 1
+  strategy: {type: Recreate}
   selector: {matchLabels: {app: cloudverse-data-center-collector}}
   template:
     metadata: {labels: {app: cloudverse-data-center-collector}}
@@ -103,6 +111,7 @@ spec:
         - {name: COLLECTOR_ENROLLMENT_TOKEN_FILE, value: /bootstrap/enrollment-token}
         - {name: COLLECTOR_PROVIDER_CONFIG_FILE, value: /config/provider.json}
         - {name: COLLECTOR_ALLOWED_HOSTS, value: "$API_HOST"}
+        - {name: NODE_EXTRA_CA_CERTS, value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
         volumeMounts:
         - {name: state, mountPath: /var/lib/cloudverse}
         - {name: run, mountPath: /var/run/cloudverse}
