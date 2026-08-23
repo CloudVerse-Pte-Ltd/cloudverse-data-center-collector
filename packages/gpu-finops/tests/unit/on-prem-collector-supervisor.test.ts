@@ -53,7 +53,7 @@ describe('InEstateCollectorSupervisor', () => {
           page: { receivedCount: 1, complete: second, ...(second ? {} : { nextCursor: 'next' }) },
           health: { status: 'HEALTHY' as const, checkedAt: '2026-08-22T00:00:00Z', stale: false },
           provenance: { connectorId: 'vcenter', connectorVersion: '1.0.0', collectedAt: '2026-08-22T00:00:00Z', managementPlaneUid: assignment.managementPlaneUid, collectionRunId: assignment.collectionRunId, source: {} },
-          capabilities: [],
+          capabilities: [{ capability: 'DISCOVER_INVENTORY' as const, status: 'READY' as const, evidenceEligibleAt: '2026-08-22T00:00:00Z', provenance: { connectorId: 'vcenter', connectorVersion: '1.0.0', collectedAt: '2026-08-22T00:00:00Z', managementPlaneUid: assignment.managementPlaneUid, collectionRunId: assignment.collectionRunId, source: {} } }],
         };
       },
     };
@@ -66,6 +66,7 @@ describe('InEstateCollectorSupervisor', () => {
       expect(verify(null, Buffer.from(canonicalBundleJson(unsigned)), publicKey, Buffer.from(signature, 'base64'))).toBe(true);
     }
     expect(envelopes[2].payload.completion).toMatchObject({ status: 'SUCCEEDED', recordCounts: { pages: 2, records: 2 } });
+    expect(envelopes[2].payload.completion.coverage).toMatchObject({ inventoryCapabilityStatus: 'READY' });
   });
 
   it('queues a signed FAILED completion when collection fails', async () => {

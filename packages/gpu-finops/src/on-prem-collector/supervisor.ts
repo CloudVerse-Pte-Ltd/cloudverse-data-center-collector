@@ -80,13 +80,14 @@ export class InEstateCollectorSupervisor {
         if (cursor) seenCursors.add(cursor);
       } while (cursor);
       const status = errors.length ? 'PARTIAL' as const : 'SUCCEEDED' as const;
+      const inventoryCapability = [...capabilities].reverse().find((result) => result.capability === 'DISCOVER_INVENTORY');
       const terminal = this.signer.create(assignment.collectionRunId, {
         records: [],
         completion: {
           status,
           recordCounts: { pages, records, errors: errors.length, capabilities: capabilities.length, scaleClass: assignment.scaleClass },
           errors,
-          coverage: { requestedWindow: assignment.requestedWindow ?? null },
+          coverage: { requestedWindow: assignment.requestedWindow ?? null, inventoryCapabilityStatus: inventoryCapability?.status ?? null },
         },
       });
       await this.queue.enqueue(terminal.bundleId, terminal.schemaVersion, Buffer.from(JSON.stringify(terminal)));

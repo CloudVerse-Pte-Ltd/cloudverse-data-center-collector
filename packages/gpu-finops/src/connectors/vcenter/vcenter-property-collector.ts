@@ -551,7 +551,7 @@ export function toVCenterTelemetryEnvelope(input: { integrationId: number; manag
     return value;
   };
   return {
-    type: 'DATA_CENTER_METRICS' as const, integrationId: input.integrationId, managementPlaneUid: input.managementPlaneUid, collectedAt: new Date(input.expectedEnd).toISOString(), platform: 'VSPHERE' as const, metricSet: input.metricSet,
+    type: 'DATA_CENTER_METRICS' as const, integrationId: input.integrationId, managementPlaneUid: input.managementPlaneUid, collectedAt: new Date(input.expectedEnd).toISOString(), platform: 'VCENTER' as const, metricSet: input.metricSet,
     metrics: input.facts.map((fact) => {
       const semanticMetric = VCENTER_CANONICAL_SEMANTIC[fact.semantic]; if (!semanticMetric) throw new VCenterConnectorError('vcenter_metric_semantic_unmapped', `vCenter semantic ${fact.semantic} is not mapped to the canonical registry.`, false);
       return { assetKind: assetKind(fact.entity), sourceUid: canonicalSourceUid(fact.assetId), semanticMetric, nativeMetric: fact.semantic, observedAt: fact.observedAt, intervalSeconds: fact.intervalSeconds, value: fact.value, unit: fact.unit, aggregation: fact.aggregation.toUpperCase(), retentionClass: 'TELEMETRY' as const, retentionDays: 90, provenance: { counterId: fact.counterId, entityType: fact.entity.type, sourceManagedObjectReference: fact.entity.value } };
