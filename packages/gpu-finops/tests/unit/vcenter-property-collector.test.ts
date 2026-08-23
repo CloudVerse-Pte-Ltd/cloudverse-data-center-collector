@@ -19,6 +19,8 @@ describe('vCenter PropertyCollector paging', () => {
     expect(result.objects[0].properties.name).toBe('ordinary-vm-1');
     expect(String(fetchImpl.mock.calls[2][1]?.body)).toContain('<vim25:maxObjects>1</vim25:maxObjects>');
     expect(String(fetchImpl.mock.calls[2][1]?.body)).toContain('group-root-42');
+    expect(String(fetchImpl.mock.calls[2][1]?.body)).toContain('<vim25:type>DistributedVirtualPortgroup</vim25:type>');
+    expect(String(fetchImpl.mock.calls[2][1]?.body)).toContain('<vim25:pathSet>config.distributedVirtualSwitch</vim25:pathSet>');
     expect((fetchImpl.mock.calls[2][1]?.headers as Record<string, string>).Cookie).toBe('vmware_soap_session=abc');
   });
 
@@ -33,16 +35,24 @@ describe('vCenter PropertyCollector paging', () => {
         { type: 'ClusterComputeResource', value: 'domain-c1', properties: { name: 'Cluster 1', parent: { '#text': 'group-h1', '@_type': 'Folder' } } },
         { type: 'HostSystem', value: 'host-1', properties: { name: 'esx-1', parent: { '#text': 'domain-c1', '@_type': 'ClusterComputeResource' }, 'hardware.systemInfo.uuid': 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' } },
         { type: 'Datastore', value: 'datastore-1', properties: { name: 'vsanDatastore', 'summary.url': 'ds:///vmfs/volumes/vsan:abc/' } },
+        { type: 'Folder', value: 'group-n1', properties: { name: 'Networks', parent: { '#text': 'datacenter-1', '@_type': 'Datacenter' } } },
+        { type: 'DistributedVirtualPortgroup', value: 'dvportgroup-42', properties: { name: 'Application DVPG', parent: { '#text': 'group-n1', '@_type': 'Folder' }, 'config.key': 'dvportgroup-42', 'config.distributedVirtualSwitch': { '#text': 'dvs-1', '@_type': 'VmwareDistributedVirtualSwitch' } } },
         { type: 'VirtualMachine', value: 'vm-42', properties: { name: 'app-01', 'config.instanceUuid': 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'runtime.host': { '#text': 'host-1', '@_type': 'HostSystem' }, datastore: [{ '#text': 'datastore-1', '@_type': 'Datastore' }] } },
       ] },
     });
     expect(envelope).toMatchObject({ type: 'VSPHERE_INVENTORY', managementPlaneUid: 'vcenter:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', pages: 2 });
     expect(envelope.resources.find((resource) => resource.id === 'VirtualMachine:vm-42')).toMatchObject({ kind: 'VIRTUAL_MACHINE', sourceUid: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', name: 'app-01' });
     expect(envelope.resources.find((resource) => resource.id === 'HostSystem:host-1')).toMatchObject({ kind: 'HOST', sourceUid: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' });
+    expect(envelope.resources.find((resource) => resource.id === 'DistributedVirtualPortgroup:dvportgroup-42')).toMatchObject({
+      kind: 'NETWORK',
+      name: 'Application DVPG',
+      attributes: { sourceObjectType: 'DistributedVirtualPortgroup', distributedPortgroupKey: 'dvportgroup-42', distributedVirtualSwitchMor: 'dvs-1' },
+    });
     expect(envelope.relationships).toEqual(expect.arrayContaining([
       { from: 'VirtualMachine:vm-42', to: 'HostSystem:host-1', type: 'RUNS_ON' },
       { from: 'VirtualMachine:vm-42', to: 'Datastore:datastore-1', type: 'USES_DATASTORE' },
       { from: 'HostSystem:host-1', to: 'ClusterComputeResource:domain-c1', type: 'MEMBER_OF' },
+      { from: 'DistributedVirtualPortgroup:dvportgroup-42', to: 'Folder:group-n1', type: 'MEMBER_OF' },
     ]));
   });
 });

@@ -204,6 +204,7 @@ function propertySpec(): string {
     VirtualMachine: ['name', 'parent', 'config.instanceUuid', 'config.uuid', 'config.template', 'config.hardware', 'config.hardware.device', 'config.annotation', 'config.extraConfig', 'runtime.host', 'resourcePool', 'datastore', 'snapshot.rootSnapshotList', 'availableField', 'customValue'],
     Datastore: ['name', 'parent', 'summary.url', 'summary.type', 'summary.capacity', 'summary.freeSpace', 'host', 'vm'],
     Network: ['name', 'parent', 'summary', 'host', 'vm'],
+    DistributedVirtualPortgroup: ['name', 'parent', 'summary', 'host', 'vm', 'config.key', 'config.distributedVirtualSwitch'],
   };
   return Object.entries(specs).map(([type, paths]) => `<vim25:propSet><vim25:type>${type}</vim25:type><vim25:all>false</vim25:all>${paths.map((path) => `<vim25:pathSet>${path}</vim25:pathSet>`).join('')}</vim25:propSet>`).join('');
 }
@@ -316,7 +317,7 @@ export function toVCenterInventoryEnvelope(input: {
     if (object.type === 'HostSystem') return 'HOST';
     if (object.type === 'VirtualMachine') return propertyText(object.properties['config.template']).toLowerCase() === 'true' ? 'TEMPLATE' : 'VIRTUAL_MACHINE';
     if (object.type === 'Datastore') return 'DATASTORE';
-    if (object.type === 'Network') return 'NETWORK';
+    if (object.type === 'Network' || object.type === 'DistributedVirtualPortgroup') return 'NETWORK';
     return undefined;
   };
   const resources = input.result.objects.flatMap((object): VCenterInventoryResource[] => {
@@ -340,6 +341,8 @@ export function toVCenterInventoryEnvelope(input: {
         capacityBytes: propertyText(object.properties['summary.capacity']) || undefined,
         freeSpaceBytes: propertyText(object.properties['summary.freeSpace']) || undefined,
         annotation: propertyText(object.properties['config.annotation']) || undefined,
+        distributedPortgroupKey: propertyText(object.properties['config.key']) || undefined,
+        distributedVirtualSwitchMor: propertyText(object.properties['config.distributedVirtualSwitch']) || undefined,
       },
     }];
   });
