@@ -146,6 +146,15 @@ describe('OpenShift Virtualization connector', () => {
     });
     const context = { integrationId: '3', collectionRunId: 'run-1', managementPlaneUid: 'openshift:infra-uid', collectedAt: '2026-08-21T04:00:00.000Z' };
     const result = await collectOpenShiftVirtualizationGraph(config, context, { fetchImpl });
+    const undefinedPaths: string[] = [];
+    const visit = (value: unknown, path = '$') => {
+      if (Array.isArray(value)) return value.forEach((item, index) => visit(item, `${path}[${index}]`));
+      if (value && typeof value === 'object') Object.entries(value).forEach(([key, item]) => {
+        if (item === undefined) undefinedPaths.push(`${path}.${key}`); else visit(item, `${path}.${key}`);
+      });
+    };
+    visit(result);
+    expect(undefinedPaths).toEqual([]);
     expect(result.errors).toEqual([]);
     expect(result.records[0]).toMatchObject({ type: 'OPENSHIFT_VIRTUALIZATION_GRAPH', integrationId: 3, managementPlaneUid: 'openshift:infra-uid' });
     expect(result.records[0].resources[0]).toMatchObject({

@@ -24,6 +24,10 @@ describe('public installer contract', () => {
     expect(source).toContain('name: cluster-monitoring-view')
     expect(source).toContain('bearerTokenFile')
     expect(source).toContain('thanos-querier')
+    expect(source).not.toContain('hostUsers: false')
+    expect(source).not.toContain('fsGroup: 65532')
+    expect(source).toContain('key: cloudverse.ai/golden-path')
+    expect(source).toContain('operator: DoesNotExist')
     expect(source).not.toContain('oc new-project cloudverse-system')
   });
 });

@@ -8,6 +8,16 @@ import { validatePrometheusDcgmConfig } from '../prometheus-dcgm/config.js';
 import { collectKubeVirtMetrics, toKubeVirtTelemetryEnvelope, type KubeVirtTelemetryEnvelope } from './kubevirt-metrics.js';
 import { collectKubeVirtResourceMetrics } from './kubevirt-resource-metrics.js';
 
+function compactJson<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((item) => compactJson(item)) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .map(([key, item]) => [key, compactJson(item)])) as T;
+  }
+  return value;
+}
+
 export interface OpenShiftCollectionContext {
   integrationId: string;
   collectionRunId: string;
@@ -46,7 +56,7 @@ export async function collectOpenShiftVirtualizationGraph(
     { capability: 'DISCOVER_PLANES', status: identityReady ? 'READY' : 'BLOCKED', evidenceEligibleAt: context.collectedAt, diagnostics: { identityStatus: discovered.identityStatus, expectedManagementPlaneUid: expectedUid }, provenance },
   ];
   if (!identityReady || !discovered.kubeVirt.present) {
-    return { records: [], errors: [{ code: !identityReady ? 'openshift_identity_unavailable' : 'kubevirt_absent', message: !identityReady ? 'Immutable OpenShift or KubeVirt control-plane UID is unavailable or does not match the collection context.' : 'OpenShift Virtualization is not installed.', retryable: false }], page: { receivedCount: 0, complete: true }, provenance, capabilities };
+    return compactJson({ records: [], errors: [{ code: !identityReady ? 'openshift_identity_unavailable' : 'kubevirt_absent', message: !identityReady ? 'Immutable OpenShift or KubeVirt control-plane UID is unavailable or does not match the collection context.' : 'OpenShift Virtualization is not installed.', retryable: false }], page: { receivedCount: 0, complete: true }, provenance, capabilities });
   }
   const collected = await client.collectInventory();
   const graph = normalizeOpenShiftVirtualizationInventory(collected.inventory);
@@ -71,12 +81,12 @@ export async function collectOpenShiftVirtualizationGraph(
     },
   };
   const envelope: OpenShiftVirtualizationGraphEnvelope = { type: 'OPENSHIFT_VIRTUALIZATION_GRAPH', integrationId, managementPlaneUid: context.managementPlaneUid, collectedAt: context.collectedAt, coverage: collected.coverage, resources: [cluster, ...graph.resources], relationships: graph.relationships };
-  return {
+  return compactJson({
     records: [envelope],
     errors: collected.failures.map((failure) => ({ code: failure.code, message: failure.message, retryable: false, details: { resource: failure.resource, path: failure.path, status: failure.status } })),
     page: { receivedCount: 1, complete: true }, provenance,
     capabilities: [...capabilities, { capability: 'DISCOVER_INVENTORY', status: collected.failures.length ? 'BLOCKED' : 'READY', evidenceEligibleAt: context.collectedAt, diagnostics: { coverage: collected.coverage, failures: collected.failures }, provenance } satisfies ConnectorCapabilityResult],
-  };
+  });
 }
 
 export interface OpenShiftInEstateAdapterConfig {
@@ -146,7 +156,7 @@ export class OpenShiftVirtualizationInEstateAdapter implements DataCenterConnect
         gaps: fallback.gaps.map((gap) => ({ semanticMetric: 'openshift.kubevirt.vm.resource', expectedStart: context.requestedWindow!.start, expectedEnd: context.requestedWindow!.end, reasonClass: gap.code, retryable: true, state: 'OPEN', evidence: { namespace: gap.namespace, name: gap.name, ...gap.details } })),
       });
     }
-    return {
+    return compactJson({
       ...result,
       records,
       page: { ...result.page, receivedCount: records.length },
@@ -156,6 +166,6 @@ export class OpenShiftVirtualizationInEstateAdapter implements DataCenterConnect
         checkedAt: result.provenance.collectedAt,
         stale: false,
       },
-    };
+    });
   }
 }

@@ -107,7 +107,15 @@ spec:
     metadata: {labels: {app: cloudverse-data-center-collector}}
     spec:
       serviceAccountName: cloudverse-data-center-collector
-      securityContext: {runAsNonRoot: true, fsGroup: 65532, seccompProfile: {type: RuntimeDefault}}
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: cloudverse.ai/golden-path
+                operator: DoesNotExist
       containers:
       - name: collector
         image: $IMAGE
