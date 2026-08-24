@@ -26,6 +26,8 @@ esac
 case "$IMAGE" in *@sha256:*) ;; *) [ "${COLLECTOR_ALLOW_MUTABLE_IMAGE:-false}" = "true" ] || { echo "Collector image must be digest-pinned" >&2; exit 1; } ;; esac
 command -v oc >/dev/null 2>&1 || { echo "oc is required" >&2; exit 1; }
 API_HOST="$(printf '%s' "$CONTROL_PLANE_URL" | sed -E 's#^https://([^/]+).*$#\1#')"
+OPENSHIFT_API_URL="$(oc whoami --show-server)"
+THANOS_HOST="$(oc get route thanos-querier -n openshift-monitoring -o jsonpath='{.spec.host}')"
 
 if ! oc auth can-i create clusterroles.rbac.authorization.k8s.io >/dev/null 2>&1 ||
   ! oc auth can-i create clusterrolebindings.rbac.authorization.k8s.io >/dev/null 2>&1; then
@@ -37,7 +39,8 @@ if ! oc get namespace cloudverse-system >/dev/null 2>&1; then
 fi
 oc create secret generic cloudverse-collector-bootstrap --from-literal=enrollment-token="$ENROLLMENT_TOKEN" --dry-run=client -o yaml | oc apply -f -
 unset ENROLLMENT_TOKEN
-oc create configmap cloudverse-collector-config --from-literal=provider.json='{"kubernetes":{"baseUrl":"https://kubernetes.default.svc","platformHint":"OPENSHIFT","auth":{"serviceAccountTokenFile":"/var/run/secrets/kubernetes.io/serviceaccount/token"}}}' --dry-run=client -o yaml | oc apply -f -
+PROVIDER_JSON="$(printf '{"kubernetes":{"baseUrl":"%s","platformHint":"OPENSHIFT","auth":{"serviceAccountTokenFile":"/var/run/secrets/kubernetes.io/serviceaccount/token"}},"prometheus":{"baseUrl":"https://%s","auth":{"bearerTokenFile":"/var/run/secrets/kubernetes.io/serviceaccount/token"}},"metricsStepSeconds":30,"resourceMetricsFallback":true}' "$OPENSHIFT_API_URL" "$THANOS_HOST")"
+oc create configmap cloudverse-collector-config --from-literal=provider.json="$PROVIDER_JSON" --dry-run=client -o yaml | oc apply -f -
 cat <<EOF | oc apply -f -
 apiVersion: v1
 kind: ServiceAccount
@@ -76,6 +79,13 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata: {name: cloudverse-data-center-collector-read}
 roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cloudverse-data-center-collector-read}
+subjects:
+- {kind: ServiceAccount, name: cloudverse-data-center-collector, namespace: cloudverse-system}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: cloudverse-data-center-collector-monitoring-view}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-monitoring-view}
 subjects:
 - {kind: ServiceAccount, name: cloudverse-data-center-collector, namespace: cloudverse-system}
 ---

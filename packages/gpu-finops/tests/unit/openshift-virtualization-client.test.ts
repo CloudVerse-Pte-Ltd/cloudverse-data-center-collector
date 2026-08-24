@@ -72,7 +72,7 @@ describe('OpenShift Virtualization connector', () => {
     expect(result.failures.every((failure) => failure.code === 'openshift_paging_cycle')).toBe(true);
   });
 
-  it('collects accessible namespace inventory while retaining cluster-scope denials', async () => {
+  it('collects accessible namespace inventory without requesting cluster-scoped resources', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input) => {
       const url = new URL(String(input));
       if (url.pathname.includes('/namespaces/chand-d-dev/')) return response({ items: [{ metadata: { uid: 'vm-1', name: 'sandbox-vm', namespace: 'chand-d-dev' } }], metadata: {} });
@@ -82,8 +82,27 @@ describe('OpenShift Virtualization connector', () => {
     const result = await createOpenShiftVirtualizationClient(config, { fetchImpl, namespaces: ['chand-d-dev'] }).collectInventory();
     expect(result.coverage).toEqual({ scope: 'NAMESPACES', namespaces: ['chand-d-dev'] });
     expect(result.inventory.virtualMachines).toHaveLength(1);
-    expect(result.failures.map((failure) => failure.resource)).toEqual(expect.arrayContaining(['nodes', 'storageclasses', 'virtualmachineclusterinstancetypes']));
-    expect(result.failures.every((failure) => failure.status === 403)).toBe(true);
+    expect(result.failures).toEqual([]);
+    expect(result.inventory.nodes).toEqual([]);
+    expect(result.inventory.storageClasses).toEqual([]);
+    expect(result.inventory.virtualMachineClusterInstanceTypes).toEqual([]);
+  });
+
+  it('uses the immutable KubeVirt control-plane UID when namespace access cannot read Infrastructure', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/version') return response({ gitVersion: 'v1.31.4' });
+      if (path === '/apis') return response({ groups: [{ name: 'kubevirt.io' }] });
+      if (path.endsWith('/infrastructures/cluster')) return response({ message: 'forbidden' }, 403);
+      if (path.endsWith('/namespaces/openshift-cnv/kubevirts')) return response({ items: [{ metadata: { uid: 'kubevirt-control-plane-uid', name: 'kubevirt-kubevirt-hyperconverged' } }], metadata: {} });
+      return response({});
+    });
+    const discovered = await createOpenShiftVirtualizationClient(config, { fetchImpl, namespaces: ['chand-d-dev'] }).discover();
+    expect(discovered).toMatchObject({
+      managementPlaneUid: 'kubevirt-control-plane-uid',
+      managementPlaneIdentitySource: 'KUBEVIRT_CONTROL_PLANE',
+      identityStatus: 'READY',
+    });
   });
 
   it('preserves VM identity while relating restarted/migrated VMIs and the complete storage graph', () => {

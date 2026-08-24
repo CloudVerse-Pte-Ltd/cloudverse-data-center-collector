@@ -1,4 +1,5 @@
 import type { PrometheusDcgmConnectorConfig } from '../prometheus-dcgm/config.js';
+import { readFile } from 'node:fs/promises';
 
 type JsonMap = Record<string, unknown>;
 const map = (value: unknown): JsonMap => value && typeof value === 'object' && !Array.isArray(value) ? value as JsonMap : {};
@@ -24,13 +25,17 @@ function url(baseUrl: string, path: string, query?: Record<string, string>) {
   for (const [key, item] of Object.entries(query ?? {})) value.searchParams.set(key, item);
   return value;
 }
-function headers(config: PrometheusDcgmConnectorConfig) {
-  const authorization = config.auth?.bearerToken ? `Bearer ${config.auth.bearerToken}` : config.auth?.basic ? `Basic ${Buffer.from(`${config.auth.basic.username}:${config.auth.basic.password}`).toString('base64')}` : undefined;
+async function headers(config: PrometheusDcgmConnectorConfig) {
+  const fileToken = config.auth?.bearerTokenFile
+    ? (await readFile(config.auth.bearerTokenFile, 'utf8')).trim()
+    : undefined;
+  const bearerToken = config.auth?.bearerToken ?? fileToken;
+  const authorization = bearerToken ? `Bearer ${bearerToken}` : config.auth?.basic ? `Basic ${Buffer.from(`${config.auth.basic.username}:${config.auth.basic.password}`).toString('base64')}` : undefined;
   return new Headers({ Accept: 'application/json', ...(config.headers ?? {}), ...(authorization ? { Authorization: authorization } : {}) });
 }
 
 async function request(config: PrometheusDcgmConnectorConfig, fetchImpl: typeof fetch, path: string, query?: Record<string, string>) {
-  const response = await fetchImpl(url(config.baseUrl, path, query), { method: 'GET', headers: headers(config) });
+  const response = await fetchImpl(url(config.baseUrl, path, query), { method: 'GET', headers: await headers(config) });
   if (!response.ok) throw Object.assign(new Error(`Prometheus API returned HTTP ${response.status}`), { status: response.status });
   const body = map(await response.json());
   if (body.status === 'error') throw new Error(String(body.error ?? 'Prometheus API error'));

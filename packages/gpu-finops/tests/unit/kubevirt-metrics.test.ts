@@ -1,10 +1,29 @@
 import { describe, expect, it, vi } from 'vitest';
 import { collectKubeVirtMetrics, discoverKubeVirtMetrics, toKubeVirtTelemetryEnvelope } from '../../src/index.js';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const config = { baseUrl: 'https://prometheus.example', auth: { bearerToken: 'secret' } };
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
 describe('C31 KubeVirt Prometheus/Thanos metrics', () => {
+  it('reads a projected service-account bearer token from a file', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'kubevirt-token-'));
+    const tokenFile = join(directory, 'token');
+    await writeFile(tokenFile, 'projected-token\n', { mode: 0o600 });
+    try {
+      const fetchImpl = vi.fn<typeof fetch>(async (_input, init) => {
+        expect((init?.headers as Headers).get('Authorization')).toBe('Bearer projected-token');
+        return response({ status: 'success', data: { result: [] } });
+      });
+      await discoverKubeVirtMetrics({ baseUrl: 'https://prometheus.example', auth: { bearerTokenFile: tokenFile } }, fetchImpl);
+      expect(fetchImpl).toHaveBeenCalledTimes(4);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('discovers Prometheus retention and KubeVirt metric availability without defaults', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       expect((init?.headers as Headers).get('Authorization')).toBe('Bearer secret');

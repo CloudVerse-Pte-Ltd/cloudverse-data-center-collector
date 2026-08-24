@@ -20,6 +20,10 @@ describe('public installer contract', () => {
     expect(source).toContain('strategy: {type: Recreate}')
     expect(source).toContain('NODE_EXTRA_CA_CERTS, value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt')
     expect(source).toContain('oc auth can-i create clusterroles.rbac.authorization.k8s.io')
+    expect(source).toContain('name: cloudverse-data-center-collector-monitoring-view')
+    expect(source).toContain('name: cluster-monitoring-view')
+    expect(source).toContain('bearerTokenFile')
+    expect(source).toContain('thanos-querier')
     expect(source).not.toContain('oc new-project cloudverse-system')
   });
 });

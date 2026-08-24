@@ -20,6 +20,7 @@ export interface PrometheusDcgmBasicAuthConfig {
 
 export interface PrometheusDcgmAuthConfig {
   bearerToken?: string;
+  bearerTokenFile?: string;
   basic?: PrometheusDcgmBasicAuthConfig;
 }
 
@@ -101,11 +102,13 @@ export function validatePrometheusDcgmConfig(
     });
   }
 
-  if (config.auth?.bearerToken && config.auth.basic) {
+  const configuredAuthMethods = [config.auth?.bearerToken, config.auth?.bearerTokenFile, config.auth?.basic]
+    .filter(Boolean).length;
+  if (configuredAuthMethods > 1) {
     findings.push({
       code: 'connector_auth_config_invalid',
       severity: 'ERROR',
-      message: 'Configure either bearer token or basic auth, not both.',
+      message: 'Configure exactly one of bearer token, bearer token file, or basic auth.',
     });
   }
 

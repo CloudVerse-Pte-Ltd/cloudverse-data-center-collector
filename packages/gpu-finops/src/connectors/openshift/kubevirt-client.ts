@@ -24,6 +24,7 @@ export interface OpenShiftVirtualizationCapability {
   };
   permissionChecks: Array<{ resource: string; verb: 'get' | 'list' | 'watch'; allowed: boolean }>;
   managementPlaneUid?: string;
+  managementPlaneIdentitySource?: 'OPENSHIFT_INFRASTRUCTURE' | 'KUBEVIRT_CONTROL_PLANE';
   clusterName?: string;
   identityStatus: 'READY' | 'BLOCKED';
 }
@@ -148,7 +149,7 @@ export function createOpenShiftVirtualizationClient(
 
   return {
     async discover() {
-      const [version, groups, kubevirt, openshift, access, infrastructure] = await Promise.all([
+      const [version, groups, kubevirt, openshift, access, infrastructure, kubeVirtControlPlanes] = await Promise.all([
         get('/version'), get('/apis'),
         get('/apis/subresources.kubevirt.io/v1').catch((): JsonMap => ({})),
         get('/apis/config.openshift.io/v1/clusteroperators/version').catch((): JsonMap => ({})),
@@ -156,6 +157,7 @@ export function createOpenShiftVirtualizationClient(
           apiVersion: 'authorization.k8s.io/v1', kind: 'SelfSubjectRulesReview', spec: { namespace: options.namespaces?.[0] ?? '' },
         }).catch((): JsonMap => ({})),
         get('/apis/config.openshift.io/v1/infrastructures/cluster').catch((): JsonMap => ({})),
+        list('/apis/kubevirt.io/v1/namespaces/openshift-cnv/kubevirts').catch((): JsonMap[] => []),
       ]);
       const groupNames = (Array.isArray(groups.groups) ? groups.groups : []).map((group) => String(map(group).name ?? '')).filter(Boolean);
       const resources = (Array.isArray(kubevirt.resources) ? kubevirt.resources : []).map((resource) => ({
@@ -169,19 +171,24 @@ export function createOpenShiftVirtualizationClient(
         (['get', 'list', 'watch'] as const).map((verb) => ({ resource, verb, allowed: allowed(resource, verb) })),
       );
       const history = Array.isArray(map(openshift.status).history) ? map(openshift.status).history as JsonMap[] : [];
+      const infrastructureUid = typeof map(infrastructure.metadata).uid === 'string' ? String(map(infrastructure.metadata).uid) : undefined;
+      const kubeVirtControlPlane = kubeVirtControlPlanes.find((item) => typeof map(item.metadata).uid === 'string');
+      const kubeVirtControlPlaneUid = kubeVirtControlPlane ? String(map(kubeVirtControlPlane.metadata).uid) : undefined;
+      const managementPlaneUid = infrastructureUid ?? kubeVirtControlPlaneUid;
       return {
         platform: 'OPENSHIFT', kubernetesVersion: String(version.gitVersion ?? version.gitVersionString ?? 'unknown'),
         openshiftVersion: history.length ? String(map(history[0]).version ?? '') || undefined : undefined,
         apiGroups: groupNames,
         kubeVirt: { present: groupNames.includes('kubevirt.io'), version: String(kubevirt.groupVersion ?? '') || undefined, resources },
         permissionChecks: checks,
-        managementPlaneUid: typeof map(infrastructure.metadata).uid === 'string' ? String(map(infrastructure.metadata).uid) : undefined,
+        managementPlaneUid,
+        managementPlaneIdentitySource: infrastructureUid ? 'OPENSHIFT_INFRASTRUCTURE' : kubeVirtControlPlaneUid ? 'KUBEVIRT_CONTROL_PLANE' : undefined,
         clusterName: typeof map(infrastructure.status).infrastructureName === 'string'
           ? String(map(infrastructure.status).infrastructureName)
           : typeof map(infrastructure.metadata).name === 'string'
             ? String(map(infrastructure.metadata).name)
             : undefined,
-        identityStatus: typeof map(infrastructure.metadata).uid === 'string' ? 'READY' : 'BLOCKED',
+        identityStatus: managementPlaneUid ? 'READY' : 'BLOCKED',
       };
     },
     async collectInventory() {
@@ -199,11 +206,11 @@ export function createOpenShiftVirtualizationClient(
         : safe(resource, `${groupPath}/${resource}`);
       const entries = await Promise.all([
         scoped('virtualmachines', '/apis/kubevirt.io/v1'), scoped('virtualmachineinstances', '/apis/kubevirt.io/v1'),
-        scoped('virtualmachineinstancemigrations', '/apis/kubevirt.io/v1'), safe('virtualmachineclusterinstancetypes', '/apis/instancetype.kubevirt.io/v1beta1/virtualmachineclusterinstancetypes'),
+        scoped('virtualmachineinstancemigrations', '/apis/kubevirt.io/v1'), scopedNamespaces.length ? Promise.resolve([]) : safe('virtualmachineclusterinstancetypes', '/apis/instancetype.kubevirt.io/v1beta1/virtualmachineclusterinstancetypes'),
         scoped('virtualmachineinstancetypes', '/apis/instancetype.kubevirt.io/v1beta1'), scoped('datavolumes', '/apis/cdi.kubevirt.io/v1beta1'),
-        scoped('persistentvolumeclaims', '/api/v1'), safe('storageclasses', '/apis/storage.k8s.io/v1/storageclasses'),
+        scoped('persistentvolumeclaims', '/api/v1'), scopedNamespaces.length ? Promise.resolve([]) : safe('storageclasses', '/apis/storage.k8s.io/v1/storageclasses'),
         scoped('volumesnapshots', '/apis/snapshot.storage.k8s.io/v1'), scoped('virtualmachinesnapshots', '/apis/snapshot.kubevirt.io/v1beta1'),
-        safe('nodes', '/api/v1/nodes'), scopedNamespaces.length
+        scopedNamespaces.length ? Promise.resolve([]) : safe('nodes', '/api/v1/nodes'), scopedNamespaces.length
           ? Promise.all(scopedNamespaces.map((namespace) => safe('namespaces', `/api/v1/namespaces/${encodeURIComponent(namespace)}`))).then((values) => values.flat())
           : safe('namespaces', '/api/v1/namespaces'),
       ]);

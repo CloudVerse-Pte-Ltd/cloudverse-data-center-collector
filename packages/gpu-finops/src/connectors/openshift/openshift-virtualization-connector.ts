@@ -3,6 +3,10 @@ import { validateKubernetesConnectorConfig } from '../kubernetes/config.js';
 import type { ConnectorCapabilityResult, ConnectorCollectionContext, ConnectorResult, DataCenterConnector } from '../../connector-sdk/index.js';
 import { createOpenShiftVirtualizationClient, type OpenShiftVirtualizationClientOptions } from './kubevirt-client.js';
 import { normalizeOpenShiftVirtualizationInventory } from './kubevirt-normalizer.js';
+import type { PrometheusDcgmConnectorConfig } from '../prometheus-dcgm/config.js';
+import { validatePrometheusDcgmConfig } from '../prometheus-dcgm/config.js';
+import { collectKubeVirtMetrics, toKubeVirtTelemetryEnvelope, type KubeVirtTelemetryEnvelope } from './kubevirt-metrics.js';
+import { collectKubeVirtResourceMetrics } from './kubevirt-resource-metrics.js';
 
 export interface OpenShiftCollectionContext {
   integrationId: string;
@@ -42,7 +46,7 @@ export async function collectOpenShiftVirtualizationGraph(
     { capability: 'DISCOVER_PLANES', status: identityReady ? 'READY' : 'BLOCKED', evidenceEligibleAt: context.collectedAt, diagnostics: { identityStatus: discovered.identityStatus, expectedManagementPlaneUid: expectedUid }, provenance },
   ];
   if (!identityReady || !discovered.kubeVirt.present) {
-    return { records: [], errors: [{ code: !identityReady ? 'openshift_identity_unavailable' : 'kubevirt_absent', message: !identityReady ? 'Immutable OpenShift Infrastructure UID is unavailable or does not match the collection context.' : 'OpenShift Virtualization is not installed.', retryable: false }], page: { receivedCount: 0, complete: true }, provenance, capabilities };
+    return { records: [], errors: [{ code: !identityReady ? 'openshift_identity_unavailable' : 'kubevirt_absent', message: !identityReady ? 'Immutable OpenShift or KubeVirt control-plane UID is unavailable or does not match the collection context.' : 'OpenShift Virtualization is not installed.', retryable: false }], page: { receivedCount: 0, complete: true }, provenance, capabilities };
   }
   const collected = await client.collectInventory();
   const graph = normalizeOpenShiftVirtualizationInventory(collected.inventory);
@@ -63,6 +67,7 @@ export async function collectOpenShiftVirtualizationGraph(
       kubernetesVersion: discovered.kubernetesVersion,
       openshiftVersion: discovered.openshiftVersion,
       kubeVirtVersion: discovered.kubeVirt.version,
+      managementPlaneIdentitySource: discovered.managementPlaneIdentitySource,
     },
   };
   const envelope: OpenShiftVirtualizationGraphEnvelope = { type: 'OPENSHIFT_VIRTUALIZATION_GRAPH', integrationId, managementPlaneUid: context.managementPlaneUid, collectedAt: context.collectedAt, coverage: collected.coverage, resources: [cluster, ...graph.resources], relationships: graph.relationships };
@@ -77,9 +82,18 @@ export async function collectOpenShiftVirtualizationGraph(
 export interface OpenShiftInEstateAdapterConfig {
   kubernetes: KubernetesConnectorConfig;
   namespaces?: string[];
+  prometheus?: PrometheusDcgmConnectorConfig;
+  metricsStepSeconds?: number;
+  resourceMetricsFallback?: boolean;
 }
 
-export class OpenShiftVirtualizationInEstateAdapter implements DataCenterConnector<OpenShiftInEstateAdapterConfig, OpenShiftVirtualizationGraphEnvelope> {
+export interface KubeVirtResourceTelemetryEnvelope {
+  type: 'DATA_CENTER_METRICS'; integrationId: number; managementPlaneUid: string; collectedAt: string; platform: 'OPENSHIFT_VIRTUALIZATION'; metricSet: 'openshift.kubevirt.vm.resource';
+  metrics: Array<{ assetKind: 'VIRTUAL_MACHINE'; sourceUid: string; semanticMetric: string; nativeMetric: string; observedAt: string; intervalSeconds: number; value: string; unit: string; aggregation: 'GAUGE'; retentionClass: 'TELEMETRY'; retentionDays: 90; provenance: Record<string, unknown> }>;
+  gaps: Array<{ semanticMetric: string; expectedStart: string; expectedEnd: string; reasonClass: string; retryable: boolean; state: 'OPEN'; evidence: Record<string, unknown> }>;
+}
+
+export class OpenShiftVirtualizationInEstateAdapter implements DataCenterConnector<OpenShiftInEstateAdapterConfig, OpenShiftVirtualizationGraphEnvelope | KubeVirtTelemetryEnvelope | KubeVirtResourceTelemetryEnvelope> {
   readonly id = 'openshift-virtualization';
   readonly version = '1.0.0';
   readonly capabilities = ['AUTHENTICATE', 'DESCRIBE_PLATFORM', 'DISCOVER_PLANES', 'DISCOVER_INVENTORY'] as const;
@@ -96,9 +110,14 @@ export class OpenShiftVirtualizationInEstateAdapter implements DataCenterConnect
     if (config.namespaces && (config.namespaces.length > 1_000 || config.namespaces.some((namespace) => !/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(namespace)))) {
       throw new Error('OpenShift namespace allowlist is invalid');
     }
+    if (config.prometheus) {
+      const prometheusError = validatePrometheusDcgmConfig(config.prometheus).findings.find((finding) => finding.severity === 'ERROR');
+      if (prometheusError) throw new Error(prometheusError.message);
+    }
+    if (config.metricsStepSeconds !== undefined && (!Number.isSafeInteger(config.metricsStepSeconds) || config.metricsStepSeconds < 1)) throw new Error('OpenShift metricsStepSeconds must be a positive integer');
   }
 
-  async collect(config: OpenShiftInEstateAdapterConfig, context: ConnectorCollectionContext): Promise<ConnectorResult<OpenShiftVirtualizationGraphEnvelope>> {
+  async collect(config: OpenShiftInEstateAdapterConfig, context: ConnectorCollectionContext): Promise<ConnectorResult<OpenShiftVirtualizationGraphEnvelope | KubeVirtTelemetryEnvelope | KubeVirtResourceTelemetryEnvelope>> {
     await this.validateConfig(config);
     if (context.cursor) throw new Error('OpenShift Virtualization client performs bounded API paging internally');
     const result = await collectOpenShiftVirtualizationGraph(config.kubernetes, {
@@ -107,8 +126,30 @@ export class OpenShiftVirtualizationInEstateAdapter implements DataCenterConnect
       managementPlaneUid: context.managementPlaneUid,
       collectedAt: new Date().toISOString(),
     }, { namespaces: config.namespaces, sourceConcurrency: this.sourceConcurrency });
+    const records: Array<OpenShiftVirtualizationGraphEnvelope | KubeVirtTelemetryEnvelope | KubeVirtResourceTelemetryEnvelope> = [...result.records];
+    const graph = result.records[0];
+    const identities = graph ? graph.resources.filter((resource) => resource.kind === 'VirtualMachineInstance').map((resource) => ({
+      namespace: resource.namespace ?? '', name: resource.name, vmiUid: resource.uid,
+      vmUid: typeof resource.attributes.vmOwnerUid === 'string' ? resource.attributes.vmOwnerUid : undefined,
+    })) : [];
+    if (config.prometheus && context.requestedWindow && result.records[0]) {
+      const intervalSeconds = config.metricsStepSeconds ?? 60;
+      const metrics = await collectKubeVirtMetrics({ config: config.prometheus, identities, start: context.requestedWindow.start, end: context.requestedWindow.end, step: `${intervalSeconds}s` });
+      records.push(toKubeVirtTelemetryEnvelope({ integrationId: Number(context.integrationId), managementPlaneUid: context.managementPlaneUid, collectedAt: result.provenance.collectedAt, intervalSeconds, expectedStart: context.requestedWindow.start, expectedEnd: context.requestedWindow.end, facts: metrics.facts, gaps: metrics.gaps }));
+    }
+    if (config.resourceMetricsFallback && context.requestedWindow && graph) {
+      const fallback = await collectKubeVirtResourceMetrics(config.kubernetes, identities);
+      records.push({
+        type: 'DATA_CENTER_METRICS', integrationId: Number(context.integrationId), managementPlaneUid: context.managementPlaneUid, collectedAt: result.provenance.collectedAt,
+        platform: 'OPENSHIFT_VIRTUALIZATION', metricSet: 'openshift.kubevirt.vm.resource',
+        metrics: fallback.facts.map((fact) => ({ assetKind: 'VIRTUAL_MACHINE', sourceUid: fact.vmUid, semanticMetric: fact.semanticMetric, nativeMetric: fact.nativeMetric, observedAt: fact.observedAt, intervalSeconds: fact.intervalSeconds, value: String(fact.value), unit: fact.unit, aggregation: 'GAUGE', retentionClass: 'TELEMETRY', retentionDays: 90, provenance: { source: 'KUBERNETES_METRICS_API', vmiUid: fact.vmiUid, podUid: fact.podUid, podName: fact.podName, namespace: fact.namespace, container: 'compute' } })),
+        gaps: fallback.gaps.map((gap) => ({ semanticMetric: 'openshift.kubevirt.vm.resource', expectedStart: context.requestedWindow!.start, expectedEnd: context.requestedWindow!.end, reasonClass: gap.code, retryable: true, state: 'OPEN', evidence: { namespace: gap.namespace, name: gap.name, ...gap.details } })),
+      });
+    }
     return {
       ...result,
+      records,
+      page: { ...result.page, receivedCount: records.length },
       errors: result.errors.map((error) => ({ ...error, category: error.code.includes('permission') ? 'AUTHORIZATION' as const : 'SOURCE_UNAVAILABLE' as const })),
       health: {
         status: result.errors.length ? 'DEGRADED' : 'HEALTHY',
