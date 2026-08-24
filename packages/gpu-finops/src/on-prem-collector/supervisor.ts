@@ -30,6 +30,18 @@ export interface CollectorSupervisorResult {
 const MAX_PAGES = 10_000;
 const MAX_RECORDS = 1_000_000;
 
+function telemetryCounts(records: unknown[]) {
+  let metrics = 0;
+  let gaps = 0;
+  for (const record of records) {
+    if (!record || typeof record !== 'object' || Array.isArray(record) || (record as { type?: unknown }).type !== 'DATA_CENTER_METRICS') continue;
+    const telemetry = record as { metrics?: unknown; gaps?: unknown };
+    metrics += Array.isArray(telemetry.metrics) ? telemetry.metrics.length : 0;
+    gaps += Array.isArray(telemetry.gaps) ? telemetry.gaps.length : 0;
+  }
+  return { metrics, gaps };
+}
+
 /** Runs native adapters inside the estate and emits only signed canonical bundles. */
 export class InEstateCollectorSupervisor {
   constructor(
@@ -44,6 +56,8 @@ export class InEstateCollectorSupervisor {
     let cursor: string | undefined;
     let pages = 0;
     let records = 0;
+    let metrics = 0;
+    let gaps = 0;
     const errors: ConnectorError[] = [];
     const capabilities: ConnectorCapabilityResult[] = [];
     const bundles: Array<Pick<SignedDataCenterBundle, 'bundleId' | 'nonce'>> = [];
@@ -73,6 +87,9 @@ export class InEstateCollectorSupervisor {
         bundles.push({ bundleId: pageBundle.bundleId, nonce: pageBundle.nonce });
         pages += 1;
         records += result.records.length;
+        const telemetry = telemetryCounts(result.records);
+        metrics += telemetry.metrics;
+        gaps += telemetry.gaps;
         errors.push(...result.errors);
         capabilities.push(...(result.capabilities ?? []));
         cursor = result.page.complete ? undefined : result.page.nextCursor;
@@ -85,7 +102,7 @@ export class InEstateCollectorSupervisor {
         records: [],
         completion: {
           status,
-          recordCounts: { pages, records, errors: errors.length, capabilities: capabilities.length, scaleClass: assignment.scaleClass },
+          recordCounts: { pages, records, metrics, gaps, errors: errors.length, capabilities: capabilities.length, scaleClass: assignment.scaleClass },
           errors,
           coverage: { requestedWindow: assignment.requestedWindow ?? null, inventoryCapabilityStatus: inventoryCapability?.status ?? null },
         },
@@ -98,7 +115,7 @@ export class InEstateCollectorSupervisor {
         records: [],
         completion: {
           status: 'FAILED',
-          recordCounts: { pages, records, errors: errors.length + 1, capabilities: capabilities.length, scaleClass: assignment.scaleClass },
+          recordCounts: { pages, records, metrics, gaps, errors: errors.length + 1, capabilities: capabilities.length, scaleClass: assignment.scaleClass },
           errors: [...errors, { code: 'collector_run_failed', message: redactCollectorError(error), retryable: false }],
           coverage: { requestedWindow: assignment.requestedWindow ?? null },
         },

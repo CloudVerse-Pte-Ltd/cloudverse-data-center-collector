@@ -25,15 +25,15 @@ spec:
             - { name: run, mountPath: /var/run/cloudverse }
             - { name: key, mountPath: /var/run/secrets/cloudverse, readOnly: true }
           startupProbe:
-            exec: { command: [node, dist/packages/gpu-finops/src/on-prem-collector/collector-entrypoint.js, --healthcheck] }
+            exec: { command: [node, --use-system-ca, dist/packages/gpu-finops/src/on-prem-collector/collector-entrypoint.js, --healthcheck] }
             periodSeconds: 5
             failureThreshold: 24
           livenessProbe:
-            exec: { command: [node, dist/packages/gpu-finops/src/on-prem-collector/collector-entrypoint.js, --healthcheck] }
+            exec: { command: [node, --use-system-ca, dist/packages/gpu-finops/src/on-prem-collector/collector-entrypoint.js, --healthcheck] }
             periodSeconds: 30
             failureThreshold: 3
           readinessProbe:
-            exec: { command: [node, dist/packages/gpu-finops/src/on-prem-collector/collector-entrypoint.js, --readiness-check] }
+            exec: { command: [node, --use-system-ca, dist/packages/gpu-finops/src/on-prem-collector/collector-entrypoint.js, --readiness-check] }
             periodSeconds: 15
             failureThreshold: 2
           resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: "1", memory: 512Mi } }

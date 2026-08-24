@@ -47,8 +47,11 @@ describe('InEstateCollectorSupervisor', () => {
       async validateConfig() {},
       async collect(_config: {}, context: any) {
         const second = context.cursor === 'next';
+        const records: unknown[] = second
+          ? [{ type: 'VSPHERE_INVENTORY', page: 2 }]
+          : [{ type: 'DATA_CENTER_METRICS', metrics: [{ value: '1' }, { value: '2' }], gaps: [{ reasonClass: 'NO_SAMPLE' }] }];
         return {
-          records: [{ type: 'VSPHERE_INVENTORY', page: second ? 2 : 1 }],
+          records,
           errors: [],
           page: { receivedCount: 1, complete: second, ...(second ? {} : { nextCursor: 'next' }) },
           health: { status: 'HEALTHY' as const, checkedAt: '2026-08-22T00:00:00Z', stale: false },
@@ -65,7 +68,7 @@ describe('InEstateCollectorSupervisor', () => {
       const { signature, ...unsigned } = envelope;
       expect(verify(null, Buffer.from(canonicalBundleJson(unsigned)), publicKey, Buffer.from(signature, 'base64'))).toBe(true);
     }
-    expect(envelopes[2].payload.completion).toMatchObject({ status: 'SUCCEEDED', recordCounts: { pages: 2, records: 2 } });
+    expect(envelopes[2].payload.completion).toMatchObject({ status: 'SUCCEEDED', recordCounts: { pages: 2, records: 2, metrics: 2, gaps: 1 } });
     expect(envelopes[2].payload.completion.coverage).toMatchObject({ inventoryCapabilityStatus: 'READY' });
   });
 

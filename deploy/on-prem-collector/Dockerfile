@@ -16,4 +16,4 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --fund=false && npm cache clea
 COPY --from=build /src/dist ./dist
 USER 65532:65532
 ENV NODE_ENV=production
-ENTRYPOINT ["node", "dist/packages/gpu-finops/src/on-prem-collector/collector-entrypoint.js"]
+ENTRYPOINT ["node", "--use-system-ca", "dist/packages/gpu-finops/src/on-prem-collector/collector-entrypoint.js"]

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { collectVCenterPerformance, collectWithPropertyCollector, probeVCenterPerformanceCounters, toVCenterInventoryEnvelope, toVCenterTelemetryEnvelope, VCenterInEstateAdapter } from '../../src/index.js';
+import { canonicalBundleJson, collectVCenterPerformance, collectWithPropertyCollector, probeVCenterPerformanceCounters, toVCenterInventoryEnvelope, toVCenterTelemetryEnvelope, VCenterInEstateAdapter } from '../../src/index.js';
 
 const soap = (body: string) => `<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body>${body}</soapenv:Body></soapenv:Envelope>`;
 const response = (body: string, headers?: HeadersInit) => new Response(soap(body), { status: 200, headers });
@@ -190,6 +190,7 @@ describe('vCenter released in-estate adapter golden path', () => {
       expect.objectContaining({ capability: 'PROBE_COUNTERS', status: 'READY' }),
       expect.objectContaining({ capability: 'COLLECT_UTILISATION', status: 'READY', diagnostics: expect.objectContaining({ points: 1, samplingPeriodSeconds: 300 }) }),
     ]));
+    expect(() => canonicalBundleJson({ records: result.records, capabilities: result.capabilities })).not.toThrow();
     expect(fetchImpl.mock.calls.some(([, init]) => String(init?.body).includes('<vim25:intervalId>300</vim25:intervalId>'))).toBe(true);
   });
 });

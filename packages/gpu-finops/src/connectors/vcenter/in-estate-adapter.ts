@@ -62,7 +62,12 @@ export class VCenterInEstateAdapter implements DataCenterConnector<VCenterInEsta
       collectedAt,
       managementPlaneUid,
       collectionRunId: context.collectionRunId,
-      source: { sourceObjectType: 'PropertyCollector', metadata: { pages: inventory.pages, version: identity.version, build: identity.build, apiType: identity.apiType } },
+      source: { sourceObjectType: 'PropertyCollector', metadata: {
+        pages: inventory.pages,
+        ...(identity.version ? { version: identity.version } : {}),
+        ...(identity.build ? { build: identity.build } : {}),
+        ...(identity.apiType ? { apiType: identity.apiType } : {}),
+      } },
     };
     const records: Array<VCenterInventoryEnvelope | VCenterTelemetryEnvelope> = [envelope];
     const capabilities: ConnectorCapabilityResult[] = this.capabilities.slice(0, 4).map((capability) => ({
@@ -112,7 +117,7 @@ export class VCenterInEstateAdapter implements DataCenterConnector<VCenterInEsta
     return {
       records,
       errors: [],
-      page: { receivedCount: records.length, complete: true, sourcePageSize: config.propertyPageSize },
+      page: { receivedCount: records.length, complete: true, ...(config.propertyPageSize === undefined ? {} : { sourcePageSize: config.propertyPageSize }) },
       health: { status: 'HEALTHY', checkedAt: collectedAt, stale: false },
       provenance,
       capabilities,
